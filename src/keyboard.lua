@@ -309,20 +309,20 @@ function keyboard.update(dt, input)
             if cand_cursor > 1 then
                 cand_cursor = cand_cursor - 1
             else
-                -- At the left edge, jump to the previous page (wrap to its end)
-                if cand_page > 1 then
-                    cand_page = cand_page - 1
+                -- Continue from the first candidate to the end of the list.
+                if #candidates > 0 then
+                    cand_page = (cand_page > 1) and cand_page - 1 or total_pages
                     local prev = keyboard.get_paged_candidates()
-                    cand_cursor = math.max(1, #prev)
+                    cand_cursor = #prev
                 end
             end
         elseif input.pressed("right") then
             if cand_cursor < #paged then
                 cand_cursor = cand_cursor + 1
             else
-                -- At the right edge, jump to the next page (wrap to its start)
-                if cand_page < total_pages then
-                    cand_page = cand_page + 1
+                -- Continue from the last candidate to the start of the list.
+                if #candidates > 0 then
+                    cand_page = (cand_page < total_pages) and cand_page + 1 or 1
                     cand_cursor = 1
                 end
             end
@@ -336,6 +336,9 @@ function keyboard.update(dt, input)
         elseif input.pressed("down") then
             cursor_row = 1
             cursor_col = 1
+        elseif input.pressed("up") then
+            cursor_row = 5
+            cursor_col = math.min(cursor_col, #keyboard.get_active_row_keys(cursor_row))
         elseif input.pressed("b") then
             keyboard.handle_backspace()
         end
@@ -366,21 +369,33 @@ function keyboard.update(dt, input)
             cursor_row = cursor_row - 1
             local keys = keyboard.get_active_row_keys(cursor_row)
             cursor_col = math.min(cursor_col, #keys)
+        else
+            cursor_row = 5
+            cursor_col = math.min(cursor_col, #keyboard.get_active_row_keys(cursor_row))
         end
     elseif input.pressed("down") then
         if cursor_row < 5 then
             cursor_row = cursor_row + 1
             local keys = keyboard.get_active_row_keys(cursor_row)
             cursor_col = math.min(cursor_col, #keys)
+        elseif #candidates > 0 then
+            cursor_row = 0
+            cand_cursor = math.min(math.max(1, cand_cursor), #keyboard.get_paged_candidates())
+        else
+            cursor_row = 1
         end
     elseif input.pressed("left") then
         if cursor_col > 1 then
             cursor_col = cursor_col - 1
+        else
+            cursor_col = #keyboard.get_active_row_keys(cursor_row)
         end
     elseif input.pressed("right") then
         local keys = keyboard.get_active_row_keys(cursor_row)
         if cursor_col < #keys then
             cursor_col = cursor_col + 1
+        else
+            cursor_col = 1
         end
     end
 

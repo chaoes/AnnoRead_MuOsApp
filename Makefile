@@ -34,6 +34,7 @@ test:
 	@luajit tests/test_discover_fixes.lua
 	@luajit tests/test_discover_offline.lua
 	@luajit tests/test_ime_and_cache.lua
+	@luajit tests/test_keyboard_wrap.lua
 	@luajit tests/test_multi_source_files.lua
 	@luajit tests/test_sources_batch.lua
 	@luajit tests/test_layout_margins.lua
