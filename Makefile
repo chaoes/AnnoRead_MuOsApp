@@ -89,6 +89,7 @@ package: test
 	@mkdir -p $(STAGE_DIR)/sources
 	@if [ -f sources/README.md ]; then cp sources/README.md $(STAGE_DIR)/sources/; fi
 	@cp $(ENGINE_DIR)/vendor/Copyright.libxml2 $(STAGE_DIR)/COPYRIGHT-libxml2.txt
+	@cp LICENSE $(STAGE_DIR)/LICENSE.txt
 	@cp $(ENGINE_DIR)/quickjs/LICENSE $(STAGE_DIR)/LICENSE-quickjs.txt
 	@cp $(VENDOR_DIR)/love-license-11.5.txt $(STAGE_DIR)/LICENSE-love-11.5.txt
 	@# swap in the device (aarch64) native rule engine

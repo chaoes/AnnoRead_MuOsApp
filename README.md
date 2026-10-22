@@ -39,4 +39,6 @@ make package    # 测试、交叉编译并生成 dist/AnnoRead.muxapp
 
 规则引擎构建细节见 [engine/BUILDING.md](engine/BUILDING.md)。
 
-随包组件的版权与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+## 许可证
+
+本项目原创部分采用 [MIT 许可证](LICENSE)。随包组件保留各自的许可，详见 [第三方许可说明](THIRD_PARTY_NOTICES.md)。
