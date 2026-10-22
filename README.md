@@ -38,3 +38,5 @@ make package    # 测试、交叉编译并生成 dist/AnnoRead.muxapp
 将 `.muxapp` 复制到 SD 卡的 `ARCHIVE` 目录，再通过 muOS Archive Manager 安装。用户数据位于 `<应用目录>/conf/love/rgcubexx-game/`；实际路径以 `love.filesystem.getSaveDirectory()` 返回值为准。构建及测试只验证主机和模拟环境，仍需在真实 RG CubeXX 上检查操作与显示。
 
 规则引擎构建细节见 [engine/BUILDING.md](engine/BUILDING.md)。
+
+随包组件的版权与许可证见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
