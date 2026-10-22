@@ -1,0 +1,32 @@
+guide = shift
+
+up = up
+down = down
+left = left
+right = right
+
+a = enter
+b = backspace
+x = c
+y = v
+
+l1 = pageup
+r1 = pagedown
+l2 = 1
+r2 = 2
+
+l3 = f
+r3 = g
+
+start = escape
+back = space
+
+left_analog_up = up
+left_analog_down = down
+left_analog_left = left
+left_analog_right = right
+
+right_analog_up = i
+right_analog_down = k
+right_analog_left = j
+right_analog_right = l

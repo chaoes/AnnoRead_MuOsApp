@@ -1,0 +1,30 @@
+[
+  {
+    "bookSourceName": "示例书源（不可用）",
+    "bookSourceGroup": "示例",
+    "bookSourceType": 0,
+    "bookSourceUrl": "https://books.example.invalid",
+    "enabled": false,
+    "enabledExplore": false,
+    "searchUrl": "https://books.example.invalid/search?q={{key}}",
+    "ruleSearch": {
+      "bookList": ".book",
+      "name": "h3@text",
+      "author": ".author@text",
+      "bookUrl": "a@href"
+    },
+    "ruleBookInfo": {
+      "name": "h1@text",
+      "author": ".author@text",
+      "tocUrl": "a.chapters@href"
+    },
+    "ruleToc": {
+      "chapterList": ".chapter a",
+      "chapterName": "@text",
+      "chapterUrl": "@href"
+    },
+    "ruleContent": {
+      "content": "#content@html"
+    }
+  }
+]
