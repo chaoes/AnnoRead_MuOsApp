@@ -734,6 +734,18 @@
             return -1;
         }
 
+        function closeOptionalTag(closable, boundaries) {
+            for (let i = stack.length - 1; i > 0; i--) {
+                const open = stack[i].tagName;
+                if (boundaries.includes(open)) return;
+                if (closable.includes(open)) {
+                    stack.length = i;
+                    current = stack[i - 1];
+                    return;
+                }
+            }
+        }
+
         while (index < len) {
             const nextTag = str.indexOf('<', index);
             if (nextTag === -1) {
@@ -815,6 +827,11 @@
             }
 
             const tagName = nameMatch[0].toLowerCase();
+            if (tagName === 'li') closeOptionalTag(['li'], ['ul', 'ol']);
+            else if (tagName === 'dt' || tagName === 'dd') closeOptionalTag(['dt', 'dd'], ['dl']);
+            else if (tagName === 'tr') closeOptionalTag(['tr'], ['table']);
+            else if (tagName === 'td' || tagName === 'th') closeOptionalTag(['td', 'th'], ['tr', 'table']);
+            else if (tagName === 'p') closeOptionalTag(['p'], ['div', 'section', 'article', 'body']);
             const elem = new Node(1, tagName);
             elem.parent = current;
             current.children.push(elem);
@@ -904,30 +921,21 @@
 
         // 3. :contains(text)
         const containsMatches = [];
-        sel = sel.replace(/:contains\(\s*([^)]+?)\s*\)/g, (_, text) => {
-            containsMatches.push(text.trim());
-            return '';
-        });
+        sel = consumePseudoArguments(sel, 'contains', containsMatches);
         for (const txt of containsMatches) {
             if (!node.text().toLowerCase().includes(txt.toLowerCase())) return false;
         }
 
         // 4. :containsOwn(text)
         const containsOwnMatches = [];
-        sel = sel.replace(/:containsOwn\(\s*([^)]+?)\s*\)/g, (_, text) => {
-            containsOwnMatches.push(text.trim());
-            return '';
-        });
+        sel = consumePseudoArguments(sel, 'containsOwn', containsOwnMatches);
         for (const txt of containsOwnMatches) {
             if (!node.ownText().toLowerCase().includes(txt.toLowerCase())) return false;
         }
 
         // 5. :matches(regex)
         const matchesReg = [];
-        sel = sel.replace(/:matches\(\s*([^)]+?)\s*\)/g, (_, pat) => {
-            matchesReg.push(pat.trim());
-            return '';
-        });
+        sel = consumePseudoArguments(sel, 'matches', matchesReg);
         for (const pat of matchesReg) {
             try {
                 if (!new RegExp(pat).test(node.text())) return false;
@@ -936,10 +944,7 @@
 
         // 6. :matchesOwn(regex)
         const matchesOwnReg = [];
-        sel = sel.replace(/:matchesOwn\(\s*([^)]+?)\s*\)/g, (_, pat) => {
-            matchesOwnReg.push(pat.trim());
-            return '';
-        });
+        sel = consumePseudoArguments(sel, 'matchesOwn', matchesOwnReg);
         for (const pat of matchesOwnReg) {
             try {
                 if (!new RegExp(pat).test(node.ownText())) return false;
@@ -1227,7 +1232,12 @@
                 const sub = querySelectorAll(root, part);
                 for (const el of sub) resultSet.add(el);
             }
-            return new JsoupElements(Array.from(resultSet));
+            const ordered = [];
+            (function visit(node) {
+                if (resultSet.has(node)) ordered.push(node);
+                for (const child of node.children || []) visit(child);
+            })(root);
+            return new JsoupElements(ordered);
         }
 
         const tokens = tokenizeCss(trimmed);
@@ -2360,28 +2370,57 @@
 
             if (!cleanRule) return obj;
 
-            // Recursive descent: `$..field` collects every matching field anywhere.
-            if (/^\./.test(cleanRule)) {
-                const targetField = cleanRule.replace(/^\.+/, '').replace(/\[\*\]$/, '').trim();
-                const collected = [];
-                (function walk(node) {
-                    if (node === null || node === undefined) return;
-                    if (Array.isArray(node)) {
-                        for (const item of node) walk(item);
-                        return;
+            // Recursive descent may follow a prefix and may have a child path.
+            // Ignore dots inside bracket-quoted property names.
+            let recursiveAt = cleanRule.startsWith('.') ? 0 : -1;
+            if (recursiveAt < 0) {
+                let quoted = null, bracketDepth = 0;
+                for (let i = 0; i < cleanRule.length - 1; i++) {
+                    const ch = cleanRule[i];
+                    if (quoted) {
+                        if (ch === quoted && cleanRule[i - 1] !== '\\') quoted = null;
+                    } else if (ch === '"' || ch === "'") quoted = ch;
+                    else if (ch === '[') bracketDepth++;
+                    else if (ch === ']') bracketDepth = Math.max(0, bracketDepth - 1);
+                    else if (bracketDepth === 0 && ch === '.' && cleanRule[i + 1] === '.') {
+                        recursiveAt = i;
+                        break;
                     }
-                    if (typeof node === 'object') {
+                }
+            }
+            if (recursiveAt >= 0) {
+                const prefix = cleanRule.slice(0, recursiveAt);
+                const tail = cleanRule.slice(recursiveAt + (recursiveAt === 0 ? 1 : 2));
+                const fieldMatch = tail.match(/^([a-zA-Z0-9_$\-]+)(.*)$/);
+                if (!fieldMatch) return [];
+                const rootValue = prefix ? RuleAnalyzer.extractFromJson(obj, prefix) : obj;
+                const collected = [], seen = new Set();
+                let nodesSeen = 0;
+                const collect = value => {
+                    if (collected.length >= 10000) throw new Error('JSONPath recursive result limit exceeded');
+                    collected.push(value);
+                };
+                (function walk(node, depth) {
+                    if (node === null || node === undefined || typeof node !== 'object') return;
+                    if (++nodesSeen > 10000 || depth > 64) throw new Error('JSONPath recursive descent limit exceeded');
+                    if (seen.has(node)) return;
+                    seen.add(node);
+                    if (Array.isArray(node)) {
+                        for (const item of node) walk(item, depth + 1);
+                    } else {
                         for (const key of Object.keys(node)) {
-                            if (key === targetField) {
-                                const v = node[key];
-                                if (Array.isArray(v)) collected.push(...v);
-                                else collected.push(v);
+                            if (key === fieldMatch[1]) {
+                                const value = node[key];
+                                if (Array.isArray(value)) {
+                                    for (const item of value) collect(item);
+                                } else collect(value);
                             }
-                            walk(node[key]);
+                            walk(node[key], depth + 1);
                         }
                     }
-                })(obj);
-                return collected;
+                })(rootValue, 0);
+                const remainder = fieldMatch[2].replace(/^\./, '');
+                return remainder ? RuleAnalyzer.extractFromJson(collected, remainder) : collected;
             }
 
             // Split path by dot only outside bracket expressions
@@ -2456,7 +2495,7 @@
                             return false;
                         });
                     } else {
-                        cur = targetList;
+                        throw new Error('Unsupported JSONPath filter: ' + expr);
                     }
                     continue;
                 }

@@ -34,6 +34,32 @@
         JSON.stringify(L.RuleAnalyzer.extractFromJson(jsonPaths, '$.rows[0,2].name')) === '["A","C"]',
         'quoted JSON keys, negative indexes and index unions');
 
+    const grouped = L.parseHTML('<a>A</a><b>B</b>');
+    assert(grouped.select('b, a').map(node => node.text()).join(',') === 'A,B',
+        'CSS selector groups return document order');
+    const looseList = L.parseHTML('<ul class="top"><li>A<li>B<ul><li>nested</ul><li>C</ul>');
+    assert(looseList.select('ul.top > li').length === 3 &&
+        looseList.select('ul.top > li')[2].text() === 'C',
+        'optional li end tags preserve list siblings and nested lists');
+    const parenText = L.parseHTML('<a>第(1)章</a>');
+    assert(parenText.select('a:contains(第(1)章)').length === 1 &&
+        parenText.select('a:matches(第\\(1\\)章)').length === 1,
+        'text pseudo selectors accept nested and escaped parentheses');
+
+    const recursiveJson = {data: {items: [{name: 'A'}, {name: 'B'}]}, 'odd..key': 'literal'};
+    assert(JSON.stringify(L.RuleAnalyzer.extractFromJson(recursiveJson, '$.data..name')) === '["A","B"]' &&
+        JSON.stringify(L.RuleAnalyzer.extractFromJson(recursiveJson, '$..items[*].name')) === '["A","B"]' &&
+        L.RuleAnalyzer.extractFromJson(recursiveJson, "$['odd..key']") === 'literal',
+        'recursive JSONPath supports prefixes, suffixes and quoted dots');
+    let rejectedFilter = false;
+    try { L.RuleAnalyzer.extractFromJson(jsonPaths, '$.rows[?(@.name =~ /A/)]'); }
+    catch (e) { rejectedFilter = /Unsupported JSONPath filter/.test(String(e)); }
+    assert(rejectedFilter, 'unsupported JSONPath filters fail instead of returning all rows');
+    let boundedResult = false;
+    try { L.RuleAnalyzer.extractFromJson({items: Array(10001).fill(1)}, '$..items'); }
+    catch (e) { boundedResult = /result limit exceeded/.test(String(e)); }
+    assert(boundedResult, 'recursive JSONPath caps result count');
+
     const urlScript = {bookSourceUrl: 'https://t.test',
         searchUrl: '@js: let u=baseUrl + "/s?q=" + encodeURIComponent(key); u'};
     assert(L.LegadoEngine.buildSearchRequest(urlScript, 'a b', 1).url ===
