@@ -71,7 +71,9 @@ while true do
         id = req.id,
         tag = req.tag,
         payload = req.payload,
-        response = result.error and "" or (result.body or "")
+        response = result.error and "" or (result.body or ""),
+        status = result.status,
+        error = result.error
     })
 end
 ]]
@@ -122,7 +124,10 @@ function http.update()
         local cb = callbacks[res.id]
         if cb then
             callbacks[res.id] = nil
-            cb(res.response, res.tag, res.payload)
+            cb(res.response, res.tag, res.payload, {
+                status = res.status,
+                error = res.error
+            })
         end
     end
 end

@@ -124,9 +124,9 @@ local function run_worker_once()
     check(ok, "Love worker failed: " .. tostring(err))
 end
 http.request_async({ url = base .. "/gzip", tag = "gzip-tag", payload = { key = "gzip-payload" } },
-    function(body, tag, payload) async_results.gzip = { body = body, tag = tag, payload = payload } end)
+    function(body, tag, payload, meta) async_results.gzip = { body = body, tag = tag, payload = payload, meta = meta } end)
 http.request_async({ url = base .. "/truncated", tag = "error-tag", payload = { key = "error-payload" } },
-    function(body, tag, payload) async_results.error = { body = body, tag = tag, payload = payload } end)
+    function(body, tag, payload, meta) async_results.error = { body = body, tag = tag, payload = payload, meta = meta } end)
 http.request_async({ url = "data:text/plain;base64,6IGG5ZCs5pyI5LiO5oKm", tag = "data-text" },
     function(body, tag) async_results.data_text = { body = body, tag = tag } end)
 http.request_async({ url = "data:application/octet-stream;base64,AP9B", type = "聆听月与悦", tag = "data-hex" },
@@ -140,8 +140,10 @@ run_worker_once()
 http.update()
 check(async_results.gzip and async_results.gzip.body == "gzip 测试正文", "async gzip response failed")
 check(async_results.gzip.tag == "gzip-tag" and async_results.gzip.payload.key == "gzip-payload", "async callback metadata changed")
+check(async_results.gzip.meta and async_results.gzip.meta.status == 200, "async HTTP status was not forwarded")
 check(async_results.error and async_results.error.body == "", "async failed transfer must deliver empty body")
 check(async_results.error.tag == "error-tag" and async_results.error.payload.key == "error-payload", "async error callback metadata changed")
+check(async_results.error.meta and async_results.error.meta.error, "async transport error was not forwarded")
 check(async_results.data_text and async_results.data_text.body == "聆听月与悦" and async_results.data_text.tag == "data-text", "async text data URI failed")
 check(async_results.data_hex and async_results.data_hex.body == "00ff41" and async_results.data_hex.tag == "data-hex", "async binary data URI hex failed")
 check(async_results.http_hex and async_results.http_hex.body == "00ff410a" and async_results.http_hex.tag == "http-hex", "async HTTP binary hex failed")

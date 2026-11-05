@@ -8,6 +8,8 @@ local sources_view = {}
 local selected_idx = 1
 local scroll_offset = 0
 local diag_status = {} -- [idx] = { text = "...", latency = 120, ok = true }
+local diag_request_id = 0
+local active_diagnoses = {}
 
 function sources_view.init()
     if storage.reload_sources then
@@ -16,6 +18,7 @@ function sources_view.init()
     selected_idx = 1
     scroll_offset = 0
     diag_status = {}
+    active_diagnoses = {}
 end
 
 function sources_view.get_enabled_counts()
@@ -27,6 +30,10 @@ function sources_view.get_enabled_counts()
     return enabled_cnt, #sources
 end
 
+function sources_view.get_diagnosis(index)
+    return diag_status[index]
+end
+
 function sources_view.batch_toggle_all(enabled)
     storage.enable_all_sources(enabled)
 end
@@ -36,18 +43,23 @@ local function run_source_diagnosis(idx)
     local src = sources[idx]
     if not src then return end
 
-    diag_status[idx] = { text = "正在测速诊断中...", ok = nil }
+    diag_request_id = diag_request_id + 1
+    local request_id = diag_request_id
+    active_diagnoses[idx] = request_id
+    diag_status[idx] = { text = "正在检查搜索请求...", ok = nil }
     local t0 = love.timer.getTime()
 
     local src_json = json.encode(src)
-    local req_json = legado.buildSearchRequest(src_json, "测试", 1)
-    if not req_json or #req_json == 0 then
+    local keyword = type(src.checkKeyWord) == "string" and src.checkKeyWord or ""
+    if keyword == "" or #keyword > 120 then keyword = "测试" end
+    local built, req_json = pcall(legado.buildSearchRequest, src_json, keyword, 1)
+    if not built or type(req_json) ~= "string" or req_json == "" then
         diag_status[idx] = { text = "诊断失败: searchUrl 规则无效", ok = false }
         return
     end
 
-    local req_obj = json.decode(req_json)
-    if not req_obj or not req_obj.url then
+    local decoded, req_obj = pcall(json.decode, req_json)
+    if not decoded or type(req_obj) ~= "table" or type(req_obj.url) ~= "string" or req_obj.url == "" then
         diag_status[idx] = { text = "诊断失败: URL 生成异常", ok = false }
         return
     end
@@ -60,21 +72,48 @@ local function run_source_diagnosis(idx)
         type = req_obj.type,
         charset = req_obj.charset,
         timeout = 5
-    }, function(resp)
+    }, function(resp, _, _, meta)
+        if active_diagnoses[idx] ~= request_id or storage.get_sources()[idx] ~= src then return end
         local elapsed = math.floor((love.timer.getTime() - t0) * 1000)
-        if resp and #resp > 10 then
-            diag_status[idx] = {
-                text = string.format("正常 (响应 %d ms, 数据 %d 字节)", elapsed, #resp),
-                latency = elapsed,
-                ok = true
-            }
-        else
-            diag_status[idx] = {
-                text = string.format("超时/请求失败 (%d ms)", elapsed),
-                latency = elapsed,
-                ok = false
-            }
+        meta = type(meta) == "table" and meta or {}
+        if meta.error then
+            diag_status[idx] = { text = string.format("网络请求失败 (%d ms)", elapsed), latency = elapsed, ok = false }
+            return
         end
+        if type(meta.status) == "number" and meta.status >= 400 then
+            diag_status[idx] = { text = string.format("网站拒绝/出错 (HTTP %d)", meta.status), latency = elapsed, ok = false }
+            return
+        end
+        if type(resp) ~= "string" or resp == "" then
+            diag_status[idx] = { text = string.format("响应为空 (%d ms)", elapsed), latency = elapsed, ok = false }
+            return
+        end
+
+        local parsed, books_json = pcall(legado.parseSearch, src_json, resp, req_obj.url)
+        local valid, books = false, nil
+        if parsed and type(books_json) == "string" then
+            valid, books = pcall(json.decode, books_json)
+        end
+        if not valid or type(books) ~= "table" then
+            diag_status[idx] = { text = "搜索规则解析失败", latency = elapsed, ok = false }
+            return
+        end
+        if #books == 0 then
+            diag_status[idx] = { text = "站点已响应，检测词无书籍/规则待确认", latency = elapsed, ok = nil }
+            return
+        end
+        for _, book in ipairs(books) do
+            if type(book) == "table" and type(book.name) == "string" and book.name ~= ""
+                    and type(book.bookUrl) == "string" and book.bookUrl ~= "" then
+                diag_status[idx] = {
+                    text = string.format("搜索阶段通过 (%d 条, %d ms)", #books, elapsed),
+                    latency = elapsed,
+                    ok = true
+                }
+                return
+            end
+        end
+        diag_status[idx] = { text = "搜索规则未提取到有效书籍", latency = elapsed, ok = false }
     end)
 end
 
@@ -342,11 +381,11 @@ function sources_view.draw(w, h, is_view_focused)
             local diag = diag_status[i]
             if diag then
                 love.graphics.setColor(diag.ok and c.success or (diag.ok == false and c.danger or c.accent))
-                love.graphics.print("测速诊断: " .. diag.text, card_x + 16, cy + 64)
+                love.graphics.print("搜索诊断: " .. diag.text, card_x + 16, cy + 64)
             else
                 love.graphics.setColor(c.text_muted)
                 local toggle_action = is_enabled and "按 [X] 停用此源" or "按 [X] 启用此源"
-                love.graphics.print("按 [A] 测速诊断  ·  " .. toggle_action, card_x + 16, cy + 64)
+                love.graphics.print("按 [A] 搜索诊断  ·  " .. toggle_action, card_x + 16, cy + 64)
             end
         end
     end

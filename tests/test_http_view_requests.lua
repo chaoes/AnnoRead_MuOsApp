@@ -5,14 +5,20 @@ local source = {
     enabled = true,
     searchUrl = "https://fixture.invalid/search",
     bookSourceUrl = "fixture-source",
+    checkKeyWord = "自定义检测词",
 }
 local requests = {}
+local callbacks = {}
+local diagnosis_keyword = nil
 package.loaded["src.storage"] = { get_sources = function() return { source } end }
 package.loaded["src.http"] = { request_async = function(options, callback)
     requests[#requests + 1] = options
+    callbacks[#callbacks + 1] = callback
 end }
+local parsed_search = "[]"
 package.loaded["src.legado"] = {
-    buildSearchRequest = function()
+    buildSearchRequest = function(_, keyword)
+        diagnosis_keyword = keyword
         return json.encode({
             url = "https://fixture.invalid/search",
             method = "POST",
@@ -22,7 +28,7 @@ package.loaded["src.legado"] = {
             charset = "gb18030",
         })
     end,
-    parseSearch = function() return "[]" end,
+    parseSearch = function() return parsed_search end,
 }
 package.loaded["src.theme"] = {}
 package.loaded["src.input"] = {}
@@ -49,9 +55,39 @@ local sources = require("src.views.sources")
 sources.init()
 sources.update(0.016, { pressed = function(action) return action == "a" end })
 assert_request(2, "source diagnosis")
+assert(diagnosis_keyword == source.checkKeyWord, "source diagnosis should use the source's check keyword")
+callbacks[2]("<html>error</html>", nil, nil, { status = 403 })
+assert(sources.get_diagnosis(1).ok == false and sources.get_diagnosis(1).text:find("HTTP 403", 1, true),
+    "HTTP error page must not be marked as a healthy source")
+
+sources.update(0.016, { pressed = function(action) return action == "a" end })
+callbacks[3]("<html>no results</html>", nil, nil, { status = 200 })
+assert(sources.get_diagnosis(1).ok == nil, "empty search result should be inconclusive")
+
+parsed_search = json.encode({ { name = "测试书", bookUrl = "https://fixture.invalid/book" } })
+sources.update(0.016, { pressed = function(action) return action == "a" end })
+callbacks[4]("<html>book</html>", nil, nil, { status = 200 })
+assert(sources.get_diagnosis(1).ok == true, "parsed book should pass search-stage diagnosis")
+
+parsed_search = "invalid JSON"
+sources.update(0.016, { pressed = function(action) return action == "a" end })
+callbacks[5]("<html>book</html>", nil, nil, { status = 200 })
+assert(sources.get_diagnosis(1).ok == false, "invalid parser output should fail diagnosis")
+
+sources.update(0.016, { pressed = function(action) return action == "a" end })
+callbacks[6]("", nil, nil, { error = "connection failed" })
+assert(sources.get_diagnosis(1).ok == false, "transport error should fail diagnosis")
+
+parsed_search = json.encode({ { name = "测试书", bookUrl = "https://fixture.invalid/book" } })
+sources.update(0.016, { pressed = function(action) return action == "a" end })
+sources.update(0.016, { pressed = function(action) return action == "a" end })
+callbacks[7]("", nil, nil, { error = "late failure" })
+assert(sources.get_diagnosis(1).text == "正在检查搜索请求...", "stale diagnosis must not replace a newer request")
+callbacks[8]("<html>book</html>", nil, nil, { status = 200 })
+assert(sources.get_diagnosis(1).ok == true, "newer diagnosis should finish normally")
 
 local change_source = require("src.views.change_source")
 change_source.open({ name = "book", origin = "other" }, "chapter", 0, function() end)
-assert_request(3, "change-source view")
+assert_request(9, "change-source view")
 
 print("HTTP view request field tests passed")
