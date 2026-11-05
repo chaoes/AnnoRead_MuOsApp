@@ -51,10 +51,8 @@
         JSON.stringify(L.RuleAnalyzer.extractFromJson(recursiveJson, '$..items[*].name')) === '["A","B"]' &&
         L.RuleAnalyzer.extractFromJson(recursiveJson, "$['odd..key']") === 'literal',
         'recursive JSONPath supports prefixes, suffixes and quoted dots');
-    let rejectedFilter = false;
-    try { L.RuleAnalyzer.extractFromJson(jsonPaths, '$.rows[?(@.name =~ /A/)]'); }
-    catch (e) { rejectedFilter = /Unsupported JSONPath filter/.test(String(e)); }
-    assert(rejectedFilter, 'unsupported JSONPath filters fail instead of returning all rows');
+    assert(JSON.stringify(L.RuleAnalyzer.extractFromJson(jsonPaths,
+        '$.rows[?(@.name =~ /A/)].name')) === '["A"]', 'JSONPath regex filter selects matching rows');
     let boundedResult = false;
     try { L.RuleAnalyzer.extractFromJson({items: Array(10001).fill(1)}, '$..items'); }
     catch (e) { boundedResult = /result limit exceeded/.test(String(e)); }
@@ -79,6 +77,28 @@
         'block start closes an open paragraph');
     assert(JSON.stringify(L.RuleAnalyzer.extractFromJson({rows: [0, 1, 2, 3, 4]}, '$.rows[0:5:2]')) === '[0,2,4]',
         'JSONPath positive slice steps');
+
+    const filteredJson = {rows: [
+        {name: 'ALPHA', stats: {score: 8}, active: true, tag: 'a||b'},
+        {name: 'beta', stats: {score: 6}, active: true, tag: 'x'},
+        {name: 'gamma', stats: {score: 9}, active: false, tag: 'y'},
+        {name: 'delta', active: false}
+    ]};
+    assert(JSON.stringify(L.RuleAnalyzer.extractFromJson(filteredJson,
+        '$.rows[?(@.name =~ /alpha/i)].name')) === '["ALPHA"]', 'JSONPath regex filter');
+    assert(JSON.stringify(L.RuleAnalyzer.extractFromJson(filteredJson,
+        '$.rows[?(@.stats.score >= 7 && @.active == true)].name')) === '["ALPHA"]',
+        'JSONPath nested fields and AND filter');
+    assert(JSON.stringify(L.RuleAnalyzer.extractFromJson(filteredJson,
+        "$.rows[?(@.tag == 'a||b' || @.tag == 'y')].name")) === '["ALPHA","gamma"]',
+        'JSONPath OR does not split a quoted value');
+    assert(L.RuleAnalyzer.extractFromJson(filteredJson, '$.rows[?(@.stats.score)].name').length === 3 &&
+        L.RuleAnalyzer.extractFromJson(filteredJson, "$.rows[?(@.stats.score == '8')]").length === 0,
+        'JSONPath existence and type-sensitive equality');
+    let rejectedMixedFilter = false;
+    try { L.RuleAnalyzer.extractFromJson(filteredJson, '$.rows[?(@.active == true || @.tag in ["x"])]'); }
+    catch (e) { rejectedMixedFilter = /Unsupported JSONPath filter/.test(String(e)); }
+    assert(rejectedMixedFilter, 'unsupported OR branch is rejected before filtering');
 
     const urlScript = {bookSourceUrl: 'https://t.test',
         searchUrl: '@js: let u=baseUrl + "/s?q=" + encodeURIComponent(key); u'};

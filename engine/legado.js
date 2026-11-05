@@ -1836,6 +1836,106 @@
         return splitRuleTopLevel(trimmed, '||', true);
     }
 
+    function splitFilterBoolean(expression, separator) {
+        const parts = [];
+        let start = 0, quote = null, regex = false, escaped = false, round = 0, square = 0;
+        for (let i = 0; i < expression.length; i++) {
+            const ch = expression[i];
+            if (quote || regex) {
+                if (escaped) escaped = false;
+                else if (ch === '\\') escaped = true;
+                else if (quote && ch === quote) quote = null;
+                else if (regex && ch === '/') regex = false;
+                continue;
+            }
+            if (ch === '"' || ch === "'") { quote = ch; continue; }
+            if (ch === '/' && expression.slice(0, i).trimEnd().endsWith('=~')) { regex = true; continue; }
+            if (ch === '(') { round++; continue; }
+            if (ch === ')') { round = Math.max(0, round - 1); continue; }
+            if (ch === '[') { square++; continue; }
+            if (ch === ']') { square = Math.max(0, square - 1); continue; }
+            if (round === 0 && square === 0 && expression.startsWith(separator, i)) {
+                parts.push(expression.slice(start, i).trim());
+                i += separator.length - 1;
+                start = i + 1;
+            }
+        }
+        parts.push(expression.slice(start).trim());
+        return parts;
+    }
+
+    function jsonFilterField(item, path) {
+        let value = item;
+        for (const part of path.split('.')) value = value && typeof value === 'object' ? value[part] : undefined;
+        return value;
+    }
+
+    function jsonFilterLiteral(raw) {
+        if (/^(['"])[\s\S]*\1$/.test(raw)) {
+            const quote = raw[0];
+            const content = raw.slice(1, -1);
+            if (quote === '"') {
+                try { return { valid: true, value: JSON.parse(raw) }; }
+                catch (e) { return { valid: false }; }
+            }
+            return { valid: true, value: content.replace(/\\(['"\\])/g, '$1') };
+        }
+        if (/^-?(?:\d+\.?\d*|\.\d+)$/.test(raw)) return { valid: true, value: Number(raw) };
+        if (raw === 'true') return { valid: true, value: true };
+        if (raw === 'false') return { valid: true, value: false };
+        if (raw === 'null') return { valid: true, value: null };
+        return { valid: false };
+    }
+
+    function compileJsonFilter(expression) {
+        const expr = expression.trim();
+        const ors = splitFilterBoolean(expr, '||');
+        if (ors.length > 1) {
+            if (ors.some(part => !part)) throw new Error('Unsupported JSONPath filter: ' + expr);
+            const predicates = ors.map(compileJsonFilter);
+            return item => predicates.some(predicate => predicate(item));
+        }
+        const ands = splitFilterBoolean(expr, '&&');
+        if (ands.length > 1) {
+            if (ands.some(part => !part)) throw new Error('Unsupported JSONPath filter: ' + expr);
+            const predicates = ands.map(compileJsonFilter);
+            return item => predicates.every(predicate => predicate(item));
+        }
+
+        const regexMatch = expr.match(/^@\.([\w$.-]+)\s*=~\s*\/((?:\\.|[^\/])*)\/([ims]*)$/);
+        if (regexMatch) {
+            let regex;
+            try { regex = new RegExp(regexMatch[2], regexMatch[3]); }
+            catch (e) { throw new Error('Invalid JSONPath filter regex'); }
+            return item => {
+                const value = jsonFilterField(item, regexMatch[1]);
+                return value !== undefined && value !== null && regex.test(String(value));
+            };
+        }
+
+        const compare = expr.match(/^@\.([\w$.-]+)\s*(==|!=|>=|<=|>|<)\s*(.+)$/);
+        if (compare) {
+            const expected = jsonFilterLiteral(compare[3].trim());
+            if (!expected.valid) throw new Error('Unsupported JSONPath filter: ' + expr);
+            return item => {
+                const actual = jsonFilterField(item, compare[1]);
+                if (actual === undefined) return false;
+                if (compare[2] === '==') return actual === expected.value;
+                if (compare[2] === '!=') return actual !== expected.value;
+                if (typeof actual !== typeof expected.value ||
+                    (typeof actual !== 'number' && typeof actual !== 'string')) return false;
+                if (compare[2] === '>') return actual > expected.value;
+                if (compare[2] === '<') return actual < expected.value;
+                if (compare[2] === '>=') return actual >= expected.value;
+                return actual <= expected.value;
+            };
+        }
+
+        const exists = expr.match(/^@\.([\w$.-]+)$/);
+        if (exists) return item => jsonFilterField(item, exists[1]) !== undefined;
+        throw new Error('Unsupported JSONPath filter: ' + expr);
+    }
+
     class RuleAnalyzer {
         /**
          * Extract a list of Elements or Items using Legado 3.0 rule syntax:
@@ -2511,38 +2611,7 @@
                         cur = [];
                         break;
                     }
-
-                    // Parse predicate: @.prop op val
-                    const predRegex = /^@\.([a-zA-Z0-9_\-]+)\s*(==|!=|>=|<=|>|<)\s*(.+)$/;
-                    const pm = expr.match(predRegex);
-                    if (pm) {
-                        const prop = pm[1];
-                        const op = pm[2];
-                        let expected = pm[3].trim().replace(/^['"]/, '').replace(/['"]$/, '');
-                        const numExpected = Number(expected);
-
-                        cur = targetList.filter(item => {
-                            if (!item || typeof item !== 'object') return false;
-                            const actual = item[prop];
-                            if (actual === undefined || actual === null) return false;
-
-                            if (!isNaN(numExpected) && typeof actual === 'number') {
-                                if (op === '>') return actual > numExpected;
-                                if (op === '<') return actual < numExpected;
-                                if (op === '>=') return actual >= numExpected;
-                                if (op === '<=') return actual <= numExpected;
-                                if (op === '==') return actual === numExpected;
-                                if (op === '!=') return actual !== numExpected;
-                            }
-
-                            const strActual = String(actual);
-                            if (op === '==') return strActual === expected;
-                            if (op === '!=') return strActual !== expected;
-                            return false;
-                        });
-                    } else {
-                        throw new Error('Unsupported JSONPath filter: ' + expr);
-                    }
+                    cur = targetList.filter(compileJsonFilter(expr));
                     continue;
                 }
 
