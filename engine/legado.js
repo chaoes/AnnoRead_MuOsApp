@@ -717,6 +717,9 @@
 
         let index = 0;
         const len = str.length;
+        const closesParagraph = new Set(['address', 'article', 'aside', 'blockquote', 'div', 'dl',
+            'fieldset', 'footer', 'form', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'header',
+            'hr', 'main', 'nav', 'ol', 'pre', 'section', 'table', 'ul']);
 
         // A '>' inside a quoted attribute is data, not the end of the tag.
         function findTagClose(start) {
@@ -832,6 +835,7 @@
             else if (tagName === 'tr') closeOptionalTag(['tr'], ['table']);
             else if (tagName === 'td' || tagName === 'th') closeOptionalTag(['td', 'th'], ['tr', 'table']);
             else if (tagName === 'p') closeOptionalTag(['p'], ['div', 'section', 'article', 'body']);
+            if (closesParagraph.has(tagName)) closeOptionalTag(['p'], ['body', 'html']);
             const elem = new Node(1, tagName);
             elem.parent = current;
             current.children.push(elem);
@@ -898,6 +902,24 @@
     // 3. CSS Selector & Legado Rule Token Matching Engine
     // =========================================================================
 
+    function jsoupRegex(pattern) {
+        let source = String(pattern), flags = '';
+        while (true) {
+            const inline = source.match(/^\(\?([ims]+)\)/);
+            if (!inline) break;
+            for (const flag of inline[1]) if (!flags.includes(flag)) flags += flag;
+            source = source.slice(inline[0].length);
+        }
+        return new RegExp(source, flags);
+    }
+
+    function matchesSelectorInContext(node, selector) {
+        if (tokenizeCss(selector).length <= 1) return matchesSimpleSelector(node, selector);
+        let root = node;
+        while (root.parent) root = root.parent;
+        return querySelectorAll(root, selector).includes(node);
+    }
+
     function matchesSimpleSelector(node, selector) {
         if (!node || node.nodeType !== 1) return false;
         if (!selector || selector === '*') return true;
@@ -909,7 +931,15 @@
         const notMatches = [];
         sel = consumePseudoArguments(sel, 'not', notMatches);
         for (const inner of notMatches) {
-            if (splitSelectorGroups(inner).some(part => matchesSimpleSelector(node, part))) return false;
+            if (splitSelectorGroups(inner).some(part => matchesSelectorInContext(node, part))) return false;
+        }
+
+        for (const name of ['is', 'where']) {
+            const choices = [];
+            sel = consumePseudoArguments(sel, name, choices);
+            for (const inner of choices) {
+                if (!splitSelectorGroups(inner).some(part => matchesSelectorInContext(node, part))) return false;
+            }
         }
 
         // 2. :has(selector)
@@ -923,14 +953,14 @@
         const containsMatches = [];
         sel = consumePseudoArguments(sel, 'contains', containsMatches);
         for (const txt of containsMatches) {
-            if (!node.text().toLowerCase().includes(txt.toLowerCase())) return false;
+            if (!node.text().toLowerCase().includes(txt.replace(/\\([()])/g, '$1').toLowerCase())) return false;
         }
 
         // 4. :containsOwn(text)
         const containsOwnMatches = [];
         sel = consumePseudoArguments(sel, 'containsOwn', containsOwnMatches);
         for (const txt of containsOwnMatches) {
-            if (!node.ownText().toLowerCase().includes(txt.toLowerCase())) return false;
+            if (!node.ownText().toLowerCase().includes(txt.replace(/\\([()])/g, '$1').toLowerCase())) return false;
         }
 
         // 5. :matches(regex)
@@ -938,7 +968,7 @@
         sel = consumePseudoArguments(sel, 'matches', matchesReg);
         for (const pat of matchesReg) {
             try {
-                if (!new RegExp(pat).test(node.text())) return false;
+                if (!jsoupRegex(pat).test(node.text())) return false;
             } catch (e) { return false; }
         }
 
@@ -947,7 +977,7 @@
         sel = consumePseudoArguments(sel, 'matchesOwn', matchesOwnReg);
         for (const pat of matchesOwnReg) {
             try {
-                if (!new RegExp(pat).test(node.ownText())) return false;
+                if (!jsoupRegex(pat).test(node.ownText())) return false;
             } catch (e) { return false; }
         }
 
@@ -1031,7 +1061,7 @@
             } else if (op === '~=') {
                 let matched = false;
                 try {
-                    matched = new RegExp(val).test(elemVal);
+                    matched = jsoupRegex(val).test(elemVal);
                 } catch (e) {
                     matched = elemVal.includes(val);
                 }
@@ -1267,6 +1297,8 @@
             const ltMatch = tok.match(/:lt\(\s*(-?\d+)\s*\)/i);
             const nthMatch = tok.match(/:nth-child\(\s*([^)]*?)\s*\)/i);
             const nthTypeMatch = tok.match(/:nth-of-type\(\s*([^)]*?)\s*\)/i);
+            const nthLastMatch = tok.match(/:nth-last-child\(\s*([^)]*?)\s*\)/i);
+            const nthLastTypeMatch = tok.match(/:nth-last-of-type\(\s*([^)]*?)\s*\)/i);
 
             let baseTok = tok;
             if (sliceMatch) baseTok = baseTok.replace(/\[\s*(-?\d*)\s*:\s*(-?\d*)\s*\]/, '');
@@ -1276,6 +1308,8 @@
             if (ltMatch) baseTok = baseTok.replace(/:lt\(\s*-?\d+\s*\)/i, '');
             if (nthMatch) baseTok = baseTok.replace(/:nth-child\(\s*[^)]*?\s*\)/i, '');
             if (nthTypeMatch) baseTok = baseTok.replace(/:nth-of-type\(\s*[^)]*?\s*\)/i, '');
+            if (nthLastMatch) baseTok = baseTok.replace(/:nth-last-child\(\s*[^)]*?\s*\)/i, '');
+            if (nthLastTypeMatch) baseTok = baseTok.replace(/:nth-last-of-type\(\s*[^)]*?\s*\)/i, '');
 
             const nextCandidates = [];
             for (const parent of currentCandidates) {
@@ -1314,6 +1348,18 @@
                     matched = matched.filter(el => {
                         const siblings = el.parent ? el.parent.children.filter(child => child.nodeType === 1 && child.tagName === el.tagName) : [];
                         return nthChildMatches(nthTypeMatch[1], siblings.indexOf(el) + 1);
+                    });
+                }
+                if (nthLastMatch) {
+                    matched = matched.filter(el => {
+                        const siblings = el.parent ? el.parent.children.filter(child => child.nodeType === 1) : [];
+                        return nthChildMatches(nthLastMatch[1], siblings.length - siblings.indexOf(el));
+                    });
+                }
+                if (nthLastTypeMatch) {
+                    matched = matched.filter(el => {
+                        const siblings = el.parent ? el.parent.children.filter(child => child.nodeType === 1 && child.tagName === el.tagName) : [];
+                        return nthChildMatches(nthLastTypeMatch[1], siblings.length - siblings.indexOf(el));
                     });
                 }
                 if (sliceMatch) {
@@ -2500,15 +2546,17 @@
                     continue;
                 }
 
-                // 2. JSONPath Slice e.g. "[-2:]" or "book[-2:]"
-                const sliceMatch = part.match(/^([a-zA-Z0-9_\-]*)\[(-?\d*):(-?\d*)\]$/);
+                // 2. JSONPath slice and positive step, e.g. "book[0:10:2]".
+                const sliceMatch = part.match(/^([a-zA-Z0-9_\-]*)\[(-?\d*):(-?\d*)(?::(-?\d+))?\]$/);
                 if (sliceMatch) {
                     const field = sliceMatch[1];
                     const targetList = field ? cur[field] : cur;
                     if (Array.isArray(targetList)) {
                         const sStart = sliceMatch[2] ? parseInt(sliceMatch[2], 10) : 0;
                         const sEnd = sliceMatch[3] ? parseInt(sliceMatch[3], 10) : targetList.length;
-                        cur = targetList.slice(sStart, sEnd);
+                        const step = sliceMatch[4] ? parseInt(sliceMatch[4], 10) : 1;
+                        if (step <= 0) throw new Error('Unsupported JSONPath slice step: ' + step);
+                        cur = targetList.slice(sStart, sEnd).filter((_, index) => index % step === 0);
                         continue;
                     }
                 }

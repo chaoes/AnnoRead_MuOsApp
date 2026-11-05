@@ -60,6 +60,26 @@
     catch (e) { boundedResult = /result limit exceeded/.test(String(e)); }
     assert(boundedResult, 'recursive JSONPath caps result count');
 
+    const headings = L.parseHTML('<h2>A</h2><h3>B</h3>');
+    assert(headings.select(':is(h2, h3)').length === 2 &&
+        headings.select(':where(h2, h3)').length === 2, 'CSS selector-list pseudo classes');
+    const complexNot = L.parseHTML('<div><a>A</a></div>');
+    assert(complexNot.select('a:not(div > a)').length === 0,
+        ':not accepts a selector with a child combinator');
+    const lastPositions = L.parseHTML('<ul><li>A</li><li>B</li><li>C</li></ul>');
+    assert(lastPositions.select('li:nth-last-child(1)')[0].text() === 'C' &&
+        lastPositions.select('li:nth-last-of-type(2)')[0].text() === 'B',
+        'reverse structural pseudo classes');
+    const flagged = L.parseHTML('<a href="chapter.TXT">CHAPTER</a>');
+    assert(flagged.select('a[href~=(?i)\\.txt$]').length === 1 &&
+        flagged.select('a:matches((?i)chapter)').length === 1,
+        'jsoup regex inline case-insensitive flag');
+    const paragraph = L.parseHTML('<p>First<div>Second</div>');
+    assert(paragraph.select('p > div').length === 0 && paragraph.select('p')[0].text() === 'First',
+        'block start closes an open paragraph');
+    assert(JSON.stringify(L.RuleAnalyzer.extractFromJson({rows: [0, 1, 2, 3, 4]}, '$.rows[0:5:2]')) === '[0,2,4]',
+        'JSONPath positive slice steps');
+
     const urlScript = {bookSourceUrl: 'https://t.test',
         searchUrl: '@js: let u=baseUrl + "/s?q=" + encodeURIComponent(key); u'};
     assert(L.LegadoEngine.buildSearchRequest(urlScript, 'a b', 1).url ===
