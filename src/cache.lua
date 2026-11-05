@@ -245,6 +245,32 @@ end
 local prefetch_queue = {}
 local is_prefetching = false
 
+local function fetch_complete_chapter(source_json, first_url, on_done)
+    local parts, visited = {}, {}
+    local function fetch_page(url, depth)
+        if not url or url == "" or visited[url] or depth > 20 then on_done(nil); return end
+        visited[url] = true
+        http.request_async({ url = url, method = "GET", timeout = 8 }, function(resp, _, _, meta)
+            if not resp or resp == "" or (meta and (meta.error or (meta.status and meta.status >= 400))) then
+                on_done(nil); return
+            end
+            local parsed, err = legado.parseContent(source_json, resp, url)
+            if err or type(parsed) ~= "table" then on_done(nil); return end
+            if type(parsed.content) == "string" and parsed.content ~= "" then
+                parts[#parts + 1] = parsed.content
+            end
+            local next_url = parsed.nextContentUrl
+            if next_url and next_url ~= "" then
+                if visited[next_url] or depth >= 20 then on_done(nil)
+                else fetch_page(next_url, depth + 1) end
+                return
+            end
+            on_done(#parts > 0 and table.concat(parts, "\n\n") or nil)
+        end)
+    end
+    fetch_page(first_url, 1)
+end
+
 function cache.prefetch_chapters(book, source_json, chapters, start_idx, count)
     local book_url = book and book.bookUrl
     local source_snapshot = source_json
@@ -272,25 +298,8 @@ function cache.prefetch_chapters(book, source_json, chapters, start_idx, count)
             return
         end
 
-        http.request_async({
-            url = chap.url,
-            method = "GET",
-            tag = "prefetch",
-            timeout = 5,
-            payload = {
-                bookUrl = book_url,
-                chapterIdx = i,
-                source_json = source_snapshot,
-                url = chap.url
-            }
-        }, function(resp, tag, payload)
-            if resp and #resp > 0 then
-                local clean_res = legado.parseContent(payload.source_json, resp, payload.url)
-                local clean_text = type(clean_res) == "table" and clean_res.content or clean_res
-                if clean_text and #clean_text > 0 then
-                    cache.save_chapter_url(payload.bookUrl, payload.url, clean_text)
-                end
-            end
+        fetch_complete_chapter(source_snapshot, chap.url, function(content)
+            if content then cache.save_chapter_url(book_url, chap.url, content) end
             -- Fetch the next prefetch chapter sequentially after previous one finishes
             fetch_next(idx_ptr + 1)
         end)
@@ -346,25 +355,11 @@ function cache.cache_book(book, source_json, chapters, on_progress, on_done)
             return
         end
 
-        http.request_async({
-            url = chap.url,
-            method = "GET",
-            tag = "cache_book",
-            timeout = 8,
-            payload = { bookUrl = book_url, chapterIdx = i, source_json = source_snapshot, url = chap.url }
-        }, function(resp)
-            if resp and #resp > 0 then
-                local clean_res = legado.parseContent(source_json, resp, chap.url)
-                local clean_text = type(clean_res) == "table" and clean_res.content or clean_res
-                if clean_text and #clean_text > 0 then
-                    local saved = cache.save_chapter_url(book_url, chap.url, clean_text)
-                    if not saved or not cache.is_cached_url(book_url, chap.url) then failed = failed + 1 end
-                else
-                    failed = failed + 1
-                end
-            else
-                failed = failed + 1
-            end
+        fetch_complete_chapter(source_snapshot, chap.url, function(content)
+            if content then
+                local saved = cache.save_chapter_url(book_url, chap.url, content)
+                if not saved or not cache.is_cached_url(book_url, chap.url) then failed = failed + 1 end
+            else failed = failed + 1 end
             done = done + 1
             if on_progress then on_progress(done, total, failed) end
             step(ptr + 1)

@@ -9,6 +9,8 @@ ffi.cdef[[
     int legado_init(void);
     void legado_free(void);
     char* legado_eval(const char* js_code);
+    char* legado_last_error(void);
+    void legado_set_exec_timeout_ms(int timeout_ms);
     char* legado_parse_sources(const char* json_str);
     char* legado_build_search_req(const char* source_json, const char* keyword, int page);
     char* legado_parse_search(const char* source_json, const char* html_or_json, const char* base_url);
@@ -24,6 +26,18 @@ ffi.cdef[[
 
 local M = {}
 local lib = nil
+
+local function last_error()
+    local ptr = lib.legado_last_error()
+    local err = ffi.string(ptr)
+    lib.legado_free_string(ptr)
+    return err ~= "" and err or nil
+end
+
+function M.set_exec_timeout_ms(timeout_ms)
+    M.load_library()
+    lib.legado_set_exec_timeout_ms(timeout_ms)
+end
 
 local function decode_json(str)
     if not str or str == "" then return nil end
@@ -162,7 +176,7 @@ function M.eval(js_code)
     local ptr = lib.legado_eval(js_code)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
-    return str
+    return str, last_error()
 end
 protect_from_jit(M.eval)
 
@@ -171,7 +185,7 @@ function M.parseSources(json_str)
     local ptr = lib.legado_parse_sources(json_str)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
-    return str
+    return str, last_error()
 end
 protect_from_jit(M.parseSources)
 
@@ -181,7 +195,7 @@ function M.buildSearchRequest(source_json, keyword, page)
     local ptr = lib.legado_build_search_req(source_json, keyword, page)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
-    return str
+    return str, last_error()
 end
 protect_from_jit(M.buildSearchRequest)
 
@@ -191,7 +205,7 @@ function M.parseSearch(source_json, html_or_json, base_url)
     local ptr = lib.legado_parse_search(source_json, html_or_json, base_url)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
-    return str
+    return str, last_error()
 end
 M.parseSearchResult = M.parseSearch
 protect_from_jit(M.parseSearch)
@@ -202,7 +216,7 @@ function M.parseBookInfo(source_json, html_or_json, base_url)
     local ptr = lib.legado_parse_book_info(source_json, html_or_json, base_url)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
-    return str
+    return str, last_error()
 end
 protect_from_jit(M.parseBookInfo)
 
@@ -211,7 +225,7 @@ function M.parseExploreCategories(explore_url)
     local ptr = lib.legado_parse_explore_categories(explore_url)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
-    return str
+    return str, last_error()
 end
 protect_from_jit(M.parseExploreCategories)
 
@@ -221,11 +235,12 @@ function M.parseToc(source_json, html_or_json, base_url)
     local ptr = lib.legado_parse_toc(source_json, html_or_json, base_url)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
+    local err = last_error()
     local obj = decode_json(str)
     if type(obj) == "table" then
-        return obj
+        return obj, err
     end
-    return { chapters = {}, nextTocUrl = nil }
+    return { chapters = {}, nextTocUrl = nil }, err or "Invalid TOC parse result"
 end
 protect_from_jit(M.parseToc)
 
@@ -235,11 +250,12 @@ function M.parseContent(source_json, html_or_json, base_url)
     local ptr = lib.legado_parse_content(source_json, html_or_json, base_url)
     local str = ffi.string(ptr)
     lib.legado_free_string(ptr)
+    local err = last_error()
     local obj = decode_json(str)
     if type(obj) == "table" then
-        return obj
+        return obj, err
     end
-    return { content = str or "", nextContentUrl = nil }
+    return { content = str or "", nextContentUrl = nil }, err or "Invalid content parse result"
 end
 protect_from_jit(M.parseContent)
 

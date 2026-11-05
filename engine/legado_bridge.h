@@ -32,6 +32,10 @@ LEGADO_API void legado_free(void);
  * Returns allocated C string (JSON or string representation). Caller must free with legado_free_string().
  */
 LEGADO_API char* legado_eval(const char* js_code);
+/** Returns the most recent bridge error, or an empty string. Caller frees it. */
+LEGADO_API char* legado_last_error(void);
+/** Limit each JavaScript call to 10..30000 ms (default 10000). */
+LEGADO_API void legado_set_exec_timeout_ms(int timeout_ms);
 
 /**
  * Parse Legado BookSources from JSON text.

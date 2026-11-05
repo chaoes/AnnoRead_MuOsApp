@@ -12,6 +12,19 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
+        if self.path in ("/gbk", "/gb18030", "/gbk-meta"):
+            text = "冷清的月光照进书房"
+            encoding = "gb18030" if self.path == "/gb18030" else "gbk"
+            data = text.encode(encoding)
+            if self.path == "/gbk-meta":
+                data = b'<meta charset="gbk">' + data
+            self.send_response(200)
+            if self.path != "/gbk-meta":
+                self.send_header("Content-Type", "text/html; charset=" + encoding)
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
+            return
         if self.path == "/binary":
             data = b"\x00\xffA\n"
             self.send_response(200)

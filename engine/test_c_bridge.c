@@ -32,6 +32,25 @@ int main() {
     assert(strcmp(eval_res, "7") == 0);
     legado_free_string(eval_res);
 
+    // Exceptions must be visible to callers; the following call must clear them.
+    char *bad = legado_parse_search("{broken", "", "");
+    char *error = legado_last_error();
+    assert(strcmp(bad, "[]") == 0 && error[0] != '\0');
+    legado_free_string(bad);
+    legado_free_string(error);
+    legado_set_exec_timeout_ms(50);
+    bad = legado_eval("for (;;) {}");
+    error = legado_last_error();
+    assert(error[0] != '\0');
+    legado_free_string(bad);
+    legado_free_string(error);
+    legado_set_exec_timeout_ms(10000);
+    eval_res = legado_eval("40 + 2");
+    error = legado_last_error();
+    assert(strcmp(eval_res, "42") == 0 && error[0] == '\0');
+    legado_free_string(eval_res);
+    legado_free_string(error);
+
     // 2. Test parse BookSource
     const char *source_json = 
     "["

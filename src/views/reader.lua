@@ -680,26 +680,26 @@ function reader.load_toc(background)
         if not already_has_catalog then reader.load_chapter(chapter_idx) end
     end
 
-    http.request_async({ url = target_toc_url, method = "GET", timeout = 8 }, function(resp)
+    http.request_async({ url = target_toc_url, method = "GET", timeout = 8 }, function(resp, _, _, meta)
         if not still_current() then return end
-        if not resp or #resp == 0 then fail("目录更新失败，继续使用本地目录"); return end
+        if not resp or #resp == 0 or (meta and (meta.error or (meta.status and meta.status >= 400))) then fail("目录更新失败，继续使用本地目录"); return end
         local detail_obj = json.decode(legado.parseBookInfo(src_json, resp, target_toc_url))
         local real_toc_url = detail_obj and detail_obj.tocUrl and #detail_obj.tocUrl > 0
             and detail_obj.tocUrl or target_toc_url
         local all_chapters, visited, pages_seen = {}, {}, 0
         local function fetch_page(page_url)
             if not still_current() then return end
-            if not page_url or page_url == "" or visited[page_url] or pages_seen >= 10 then
-                if #all_chapters > 0 then accept_toc(all_chapters, real_toc_url)
-                else fail("目录解析失败，继续使用本地目录") end
+            if not page_url or page_url == "" or visited[page_url] or pages_seen >= 64 then
+                fail("目录分页不完整，保留旧目录")
                 return
             end
             visited[page_url] = true
             pages_seen = pages_seen + 1
-            http.request_async({ url = page_url, method = "GET", timeout = 8 }, function(toc_resp)
+            http.request_async({ url = page_url, method = "GET", timeout = 8 }, function(toc_resp, _, _, meta)
                 if not still_current() then return end
-                if not toc_resp or #toc_resp == 0 then fail("目录分页失败，保留旧目录"); return end
-                local parsed = legado.parseToc(src_json, toc_resp, page_url)
+                if not toc_resp or #toc_resp == 0 or (meta and (meta.error or (meta.status and meta.status >= 400))) then fail("目录分页失败，保留旧目录"); return end
+                local parsed, parse_error = legado.parseToc(src_json, toc_resp, page_url)
+                if parse_error then fail("目录解析失败，保留旧目录"); return end
                 local list = type(parsed) == "table" and (parsed.chapters or parsed)
                     or json.decode(parsed)
                 if type(list) ~= "table" or #list == 0 then
@@ -709,7 +709,7 @@ function reader.load_toc(background)
                 for _, ch in ipairs(list) do all_chapters[#all_chapters + 1] = ch end
                 local next_url = type(parsed) == "table" and parsed.nextTocUrl
                 if next_url and next_url ~= "" then
-                    if visited[next_url] or pages_seen >= 10 then fail("目录分页不完整，保留旧目录")
+                    if visited[next_url] or pages_seen >= 64 then fail("目录分页不完整，保留旧目录")
                     else fetch_page(next_url) end
                 else
                     accept_toc(all_chapters, real_toc_url)
@@ -837,19 +837,30 @@ function reader.load_chapter(idx, target_page)
     local full_content_parts = {}
     local visited_content_urls = {}
 
+    local function finish_content(complete)
+        if not still_current() then return end
+        is_loading = false
+        if #full_content_parts == 0 then
+            loading_status = "正文抓取失败，按 [A] 重试"
+            return
+        end
+        current_content = table.concat(full_content_parts, "\n\n")
+        relayout(720, 720)
+        apply_target_page()
+        if not complete then
+            loading_status = "正文分页不完整，当前内容未缓存；按 [A] 重试"
+            return
+        end
+        loading_status = ""
+        cache.save_chapter_url(book_url, chapter_url, current_content)
+        if can_use_network() and source_matches_book() then
+            cache.prefetch_chapters({ bookUrl = book_url }, src_json, chapters, chapter_idx + 1, 5)
+        end
+    end
+
     local function fetch_content_page(page_url, depth)
-        if not page_url or page_url == "" or visited_content_urls[page_url] or depth > 5 then
-            if not still_current() then return end
-            is_loading = false
-            if #full_content_parts > 0 then
-                current_content = table.concat(full_content_parts, "\n\n")
-                cache.save_chapter_url(book_url, chapter_url, current_content)
-                relayout(720, 720)
-                apply_target_page()
-                if can_use_network() and source_matches_book() then cache.prefetch_chapters({ bookUrl = book_url }, src_json, chapters, chapter_idx + 1, 5) end
-            else
-                loading_status = "正文抓取失败，按 [A] 重试"
-            end
+        if not page_url or page_url == "" or visited_content_urls[page_url] or depth > 20 then
+            finish_content(false)
             return
         end
 
@@ -858,32 +869,28 @@ function reader.load_chapter(idx, target_page)
             url = page_url,
             method = "GET",
             timeout = 8
-        }, function(resp)
+        }, function(resp, _, _, meta)
             if not still_current() then return end
-            if resp and #resp > 0 then
-                local clean_res = legado.parseContent(src_json, resp, page_url)
-                local clean_text = type(clean_res) == "table" and clean_res.content or clean_res
-                if clean_text and #clean_text > 0 then
-                    table.insert(full_content_parts, clean_text)
-                end
-
-                local next_url = type(clean_res) == "table" and clean_res.nextContentUrl
-                if next_url and #next_url > 0 and next_url ~= page_url and not visited_content_urls[next_url] then
+            if not resp or #resp == 0 or (meta and (meta.error or (meta.status and meta.status >= 400))) then
+                finish_content(false)
+                return
+            end
+            local clean_res, parse_error = legado.parseContent(src_json, resp, page_url)
+            if parse_error then finish_content(false); return end
+            local clean_text = type(clean_res) == "table" and clean_res.content or clean_res
+            if clean_text and #clean_text > 0 then
+                table.insert(full_content_parts, clean_text)
+            end
+            local next_url = type(clean_res) == "table" and clean_res.nextContentUrl
+            if next_url and next_url ~= "" then
+                if next_url == page_url or visited_content_urls[next_url] or depth >= 20 then
+                    finish_content(false)
+                else
                     fetch_content_page(next_url, depth + 1)
-                    return
                 end
+                return
             end
-
-            is_loading = false
-            if #full_content_parts > 0 then
-                current_content = table.concat(full_content_parts, "\n\n")
-                cache.save_chapter_url(book_url, chapter_url, current_content)
-                relayout(720, 720)
-                apply_target_page()
-                if can_use_network() and source_matches_book() then cache.prefetch_chapters({ bookUrl = book_url }, src_json, chapters, chapter_idx + 1, 5) end
-            else
-                loading_status = "正文抓取失败，按 [A] 重试"
-            end
+            finish_content(true)
         end)
     end
 

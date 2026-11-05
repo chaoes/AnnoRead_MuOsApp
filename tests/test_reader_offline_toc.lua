@@ -51,7 +51,12 @@ package.loaded["src.legado"] = {
         if body == "reordered" then return { chapters = { { title = "two", url = "u2" }, { title = "one", url = "u1" } } } end
         return { chapters = {} }
     end,
-    parseContent = function(_, body) return { content = body } end,
+    parseContent = function(_, body)
+        if body == "multipart1" then return { content = "first half", nextContentUrl = "part-two" } end
+        if body == "multipart2" then return { content = "second half" } end
+        if body == "cycle" then return { content = "first half", nextContentUrl = "part-two" } end
+        return { content = body }
+    end,
 }
 package.loaded["src.views.change_source"] = { is_open = function() return false end }
 package.loaded["src.book_download"] = { start = function() end }
@@ -271,5 +276,33 @@ assert(failed_done == false and cache.load_toc(failed_book.bookUrl, failed_book.
 cache.delete_book(download_book_url)
 assert(cache.load_toc(download_book_url, "source-A") == nil
     and not cache.is_cached_url(download_book_url, "u1"), "book deletion removes TOC and URL bodies")
+
+-- A failed second content page remains readable in memory but never becomes an offline cache hit.
+local paged_book = { bookUrl = "book-paged", origin = "source-A", tocUrl = "detail", currentChapterIndex = 1 }
+assert(cache.save_toc(paged_book.bookUrl, paged_book.origin, { { title = "paged", url = "paged-url" } }, "toc"))
+reader.open_book(paged_book)
+reader.load_chapter(1)
+local first_page = #requests
+assert(requests[first_page].opts.url == "paged-url", "paged chapter starts at its first URL: " .. tostring(requests[first_page].opts.url))
+requests[first_page].cb("multipart1")
+local second_page = #requests
+assert(requests[second_page].opts.url == "part-two", "reader follows content pagination")
+requests[second_page].cb(nil)
+assert(reader.get_current_content() == "first half", "partial text remains visible")
+assert(not cache.is_cached_url(paged_book.bookUrl, "paged-url"), "partial chapter must not be cached")
+reader.reload_chapter()
+local retry_first = #requests
+requests[retry_first].cb("multipart1")
+requests[#requests].cb("multipart2")
+assert(reader.get_current_content() == "first half\n\nsecond half", "complete chapter combines pages")
+assert(cache.get_chapter_url(paged_book.bookUrl, "paged-url") == "first half\n\nsecond half", "complete chapter is cached")
+
+local bulk_failed
+cache.cache_book({ bookUrl = "book-bulk-paged" }, json.encode(source), { { title = "paged", url = "bulk-url" } }, nil,
+    function(_, _, failed) bulk_failed = failed end)
+requests[#requests].cb("multipart1")
+requests[#requests].cb(nil)
+assert(bulk_failed == 1 and not cache.is_cached_url("book-bulk-paged", "bulk-url"),
+    "whole-book caching rejects incomplete paginated content")
 
 print("Reader offline TOC regression tests passed")

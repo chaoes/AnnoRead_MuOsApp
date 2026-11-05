@@ -2,12 +2,37 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "quickjs.h"
 #include "legado_js_bundle.h"
 #include "native_xpath.h"
 
 static JSRuntime *g_rt = NULL;
 static JSContext *g_ctx = NULL;
+static char *g_last_error = NULL;
+static int g_timeout_ms = 10000;
+static int64_t g_deadline_ms = 0;
+
+static int64_t monotonic_ms(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static int interrupt_if_expired(JSContext *ctx, void *opaque) {
+    (void)ctx; (void)opaque;
+    return g_deadline_ms && monotonic_ms() >= g_deadline_ms;
+}
+
+static void set_last_error(const char *message) {
+    free(g_last_error);
+    g_last_error = message && *message ? strdup(message) : NULL;
+}
+
+char *legado_last_error(void) { return strdup(g_last_error ? g_last_error : ""); }
+void legado_set_exec_timeout_ms(int timeout_ms) {
+    g_timeout_ms = timeout_ms >= 10 && timeout_ms <= 30000 ? timeout_ms : 10000;
+}
 
 // Host callbacks registered from Lua (via LuaJIT FFI). NULL = feature disabled.
 static char* (*g_ajax_cb)(const char* url, const char* opts, int timeout) = NULL;
@@ -25,51 +50,59 @@ void legado_set_crypto_callback(char* (*fn)(const char* algo, const char* key, c
 #define LEGADO_JS_LEN  (legado_js_len)
 
 static const char* BRIDGE_INIT_SCRIPT = 
+"globalThis.__legado_last_error = '';\n"
 "globalThis.__bridge = {\n"
 "    parseSources: function(str) {\n"
+"        globalThis.__legado_last_error = '';\n"
 "        try {\n"
 "            return JSON.stringify(Legado.LegadoEngine.parseBookSources(str));\n"
-"        } catch(e) { return '[]'; }\n"
+"        } catch(e) { globalThis.__legado_last_error = String(e); return '[]'; }\n"
 "    },\n"
 "    buildSearchReq: function(srcJson, key, page) {\n"
+"        globalThis.__legado_last_error = '';\n"
 "        try {\n"
 "            var src = JSON.parse(srcJson);\n"
 "            var req = Legado.LegadoEngine.buildSearchRequest(src, key, parseInt(page) || 1);\n"
 "            return JSON.stringify(req);\n"
-"        } catch(e) { return 'null'; }\n"
+"        } catch(e) { globalThis.__legado_last_error = String(e); return 'null'; }\n"
 "    },\n"
 "    parseSearch: function(srcJson, html, base) {\n"
+"        globalThis.__legado_last_error = '';\n"
 "        try {\n"
 "            var src = JSON.parse(srcJson);\n"
 "            var res = Legado.LegadoEngine.parseSearchResult(src, html, base);\n"
 "            return JSON.stringify(res);\n"
-"        } catch(e) { return '[]'; }\n"
+"        } catch(e) { globalThis.__legado_last_error = String(e); return '[]'; }\n"
 "    },\n"
 "    parseBookInfo: function(srcJson, html, base) {\n"
+"        globalThis.__legado_last_error = '';\n"
 "        try {\n"
 "            var src = JSON.parse(srcJson);\n"
 "            var res = Legado.LegadoEngine.parseBookInfo(src, html, base);\n"
 "            return JSON.stringify(res || {});\n"
-"        } catch(e) { return '{}'; }\n"
+"        } catch(e) { globalThis.__legado_last_error = String(e); return '{}'; }\n"
 "    },\n"
 "    parseExplore: function(url) {\n"
+"        globalThis.__legado_last_error = '';\n"
 "        try {\n"
 "            return JSON.stringify(Legado.LegadoEngine.parseExploreCategories(url));\n"
-"        } catch(e) { return '[]'; }\n"
+"        } catch(e) { globalThis.__legado_last_error = String(e); return '[]'; }\n"
 "    },\n"
 "    parseToc: function(srcJson, html, base) {\n"
+"        globalThis.__legado_last_error = '';\n"
 "        try {\n"
 "            var src = JSON.parse(srcJson);\n"
 "            var res = Legado.LegadoEngine.parseToc(src, html, base);\n"
 "            return JSON.stringify(res);\n"
-"        } catch(e) { return '{\"chapters\":[],\"nextTocUrl\":null}'; }\n"
+"        } catch(e) { globalThis.__legado_last_error = String(e); return '{\"chapters\":[],\"nextTocUrl\":null}'; }\n"
 "    },\n"
 "    parseContent: function(srcJson, html, base) {\n"
+"        globalThis.__legado_last_error = '';\n"
 "        try {\n"
 "            var src = JSON.parse(srcJson);\n"
 "            var res = Legado.LegadoEngine.parseContent(src, html, base);\n"
 "            return JSON.stringify(res);\n"
-"        } catch(e) { return '{\"content\":\"\",\"nextContentUrl\":null}'; }\n"
+"        } catch(e) { globalThis.__legado_last_error = String(e); return '{\"content\":\"\",\"nextContentUrl\":null}'; }\n"
 "    }\n"
 "};\n"
 "globalThis.java = new Legado.JsHost('');\n";
@@ -154,6 +187,9 @@ int legado_init(void) {
 
     g_rt = JS_NewRuntime();
     if (!g_rt) return 0;
+    JS_SetMemoryLimit(g_rt, 64 * 1024 * 1024);
+    JS_SetMaxStackSize(g_rt, 1024 * 1024);
+    JS_SetInterruptHandler(g_rt, interrupt_if_expired, NULL);
 
     g_ctx = JS_NewContext(g_rt);
     if (!g_ctx) {
@@ -207,6 +243,8 @@ int legado_init(void) {
 }
 
 void legado_free(void) {
+    g_deadline_ms = 0;
+    set_last_error(NULL);
     native_xpath_clear();
     if (g_ctx) {
         JS_FreeContext(g_ctx);
@@ -225,7 +263,9 @@ void legado_free_string(char* ptr) {
 }
 
 static char* call_bridge_fn(const char* fn_name, int argc, JSValueConst *argv) {
+    set_last_error(NULL);
     if (!g_ctx && !legado_init()) {
+        set_last_error("QuickJS initialization failed");
         return strdup("");
     }
 
@@ -244,7 +284,9 @@ static char* call_bridge_fn(const char* fn_name, int argc, JSValueConst *argv) {
         return strdup("");
     }
 
+    g_deadline_ms = monotonic_ms() + g_timeout_ms;
     JSValue ret = JS_Call(g_ctx, fn, bridge_obj, argc, argv);
+    g_deadline_ms = 0;
     char *out_str = NULL;
     if (!JS_IsException(ret)) {
         const char *cstr = JS_ToCString(g_ctx, ret);
@@ -256,8 +298,17 @@ static char* call_bridge_fn(const char* fn_name, int argc, JSValueConst *argv) {
         JSValue exc = JS_GetException(g_ctx);
         const char *err = JS_ToCString(g_ctx, exc);
         fprintf(stderr, "[LegadoBridge Error in %s]: %s\n", fn_name, err ? err : "");
+        set_last_error(err ? err : "QuickJS exception");
         JS_FreeCString(g_ctx, err);
         JS_FreeValue(g_ctx, exc);
+    }
+
+    if (!g_last_error) {
+        JSValue js_error = JS_GetPropertyStr(g_ctx, global_obj, "__legado_last_error");
+        const char *message = JS_ToCString(g_ctx, js_error);
+        set_last_error(message);
+        if (message) JS_FreeCString(g_ctx, message);
+        JS_FreeValue(g_ctx, js_error);
     }
 
     JS_FreeValue(g_ctx, ret);
@@ -270,12 +321,15 @@ static char* call_bridge_fn(const char* fn_name, int argc, JSValueConst *argv) {
 }
 
 char* legado_eval(const char* js_code) {
+    set_last_error(NULL);
     if (!g_ctx && !legado_init()) {
         return strdup("");
     }
     if (!js_code) return strdup("");
 
+    g_deadline_ms = monotonic_ms() + g_timeout_ms;
     JSValue val = JS_Eval(g_ctx, js_code, strlen(js_code), "<eval>", JS_EVAL_TYPE_GLOBAL);
+    g_deadline_ms = 0;
     char *res = NULL;
     if (!JS_IsException(val)) {
         const char *cstr = JS_ToCString(g_ctx, val);
@@ -289,6 +343,7 @@ char* legado_eval(const char* js_code) {
         JSValue stack = JS_GetPropertyStr(g_ctx, exc, "stack");
         const char *stk = JS_ToCString(g_ctx, stack);
         fprintf(stderr, "[LegadoBridge Error in legado_eval]: %s\nStack:\n%s\n", err ? err : "", stk ? stk : "");
+        set_last_error(err ? err : "QuickJS exception");
         JS_FreeCString(g_ctx, stk);
         JS_FreeValue(g_ctx, stack);
         JS_FreeCString(g_ctx, err);

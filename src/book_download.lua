@@ -19,7 +19,7 @@ local cache = require("src.cache")
 
 local book_download = {}
 
-local MAX_TOC_PAGES = 10
+local MAX_TOC_PAGES = 64
 
 local function resolve_source(book)
     if book and book.origin then
@@ -42,13 +42,14 @@ local function fetch_all_chapters(source, book, on_done)
 
     local function fetch_page(page_url, depth, toc_url)
         if not page_url or page_url == "" or visited[page_url] or depth > MAX_TOC_PAGES then
-            on_done(#all > 0 and all or nil, toc_url)
+            on_done(nil, toc_url)
             return
         end
         visited[page_url] = true
-        http.request_async({ url = page_url, method = "GET", timeout = 8 }, function(resp)
-            if not resp or #resp == 0 then on_done(nil); return end
-            local parsed = legado.parseToc(src_json, resp, page_url)
+        http.request_async({ url = page_url, method = "GET", timeout = 8 }, function(resp, _, _, meta)
+            if not resp or #resp == 0 or (meta and (meta.error or (meta.status and meta.status >= 400))) then on_done(nil); return end
+            local parsed, parse_error = legado.parseToc(src_json, resp, page_url)
+            if parse_error then on_done(nil); return end
             local chs = type(parsed) == "table" and (parsed.chapters or parsed) or json.decode(parsed)
             if type(chs) ~= "table" or #chs == 0 then on_done(nil); return end
             for _, ch in ipairs(chs) do table.insert(all, ch) end
@@ -63,9 +64,9 @@ local function fetch_all_chapters(source, book, on_done)
     end
 
     -- First hop: resolve the real tocUrl from the book page.
-    http.request_async({ url = target_toc_url, method = "GET", timeout = 8 }, function(resp)
+    http.request_async({ url = target_toc_url, method = "GET", timeout = 8 }, function(resp, _, _, meta)
         local real_toc_url = target_toc_url
-        if not resp or #resp == 0 then on_done(nil); return end
+        if not resp or #resp == 0 or (meta and (meta.error or (meta.status and meta.status >= 400))) then on_done(nil); return end
         if resp and #resp > 0 then
             local detail_json = legado.parseBookInfo(src_json, resp, target_toc_url)
             local detail_obj = json.decode(detail_json)

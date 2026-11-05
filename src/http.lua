@@ -40,11 +40,6 @@ function http.request_sync_result(url, opts_json, timeout)
     if not url or url == "" then return { body = "", headers = {}, error = "empty URL" } end
     local options = transport.resolve_options(make_sync_options(url, opts_json, timeout))
     local result = transport.perform(options)
-    if options.charset then
-        result.charset_requested = options.charset
-        result.charset_applied = false
-        result.charset_error = "response charset conversion is unavailable in the bundled runtime"
-    end
     return result
 end
 

@@ -52,8 +52,8 @@ local function run_source_diagnosis(idx)
     local src_json = json.encode(src)
     local keyword = type(src.checkKeyWord) == "string" and src.checkKeyWord or ""
     if keyword == "" or #keyword > 120 then keyword = "测试" end
-    local built, req_json = pcall(legado.buildSearchRequest, src_json, keyword, 1)
-    if not built or type(req_json) ~= "string" or req_json == "" then
+    local built, req_json, rule_error = pcall(legado.buildSearchRequest, src_json, keyword, 1)
+    if not built or rule_error or type(req_json) ~= "string" or req_json == "" then
         diag_status[idx] = { text = "诊断失败: searchUrl 规则无效", ok = false }
         return
     end
@@ -89,7 +89,11 @@ local function run_source_diagnosis(idx)
             return
         end
 
-        local parsed, books_json = pcall(legado.parseSearch, src_json, resp, req_obj.url)
+        local parsed, books_json, rule_error = pcall(legado.parseSearch, src_json, resp, req_obj.url)
+        if not parsed or rule_error then
+            diag_status[idx] = { text = "搜索规则解析失败", latency = elapsed, ok = false }
+            return
+        end
         local valid, books = false, nil
         if parsed and type(books_json) == "string" then
             valid, books = pcall(json.decode, books_json)

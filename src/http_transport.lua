@@ -1,6 +1,7 @@
 -- Shared curl transport for the main Lua state and Love worker threads.
 local M = {}
 local json = require("src.json")
+local charset = require("src.charset")
 local BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
 local function hex_bytes(bytes)
@@ -16,6 +17,29 @@ local function apply_response_type(result, req)
     -- bytes as lowercase hex, including embedded NULs and line breaks.
     if req.type ~= nil and not result.error and result.body ~= nil then
         result.body = hex_bytes(result.body)
+    end
+    return result
+end
+
+local function decode_response(result, req)
+    if req.type ~= nil or result.error or result.body == nil then return result end
+    local name = req.charset
+    if not name or name == "" then
+        name = (result.headers["content-type"] or ""):lower():match("charset%s*=%s*['\"]?([%w_%-]+)")
+    end
+    if not name or name == "" then
+        name = result.body:sub(1, 4096):lower():match("charset%s*=%s*['\"]?([%w_%-]+)")
+    end
+    if not name or name == "" then return result end
+    result.charset_requested = name
+    local converted, err = charset.convert(result.body, name)
+    if converted then
+        result.body = converted
+        result.charset_applied = true
+    else
+        result.charset_applied = false
+        result.charset_error = err
+        result.error = err
     end
     return result
 end
@@ -199,7 +223,7 @@ function M.perform(req)
     local headers_raw = hf and hf:read("*a") or ""
     if hf then hf:close() end
     os.remove(header_path)
-    return apply_response_type(M.parse_output(output, headers_raw, ok, code), req)
+    return apply_response_type(decode_response(M.parse_output(output, headers_raw, ok, code), req), req)
 end
 
 return M

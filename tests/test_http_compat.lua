@@ -16,6 +16,14 @@ check(deflate.status == 200 and deflate.body == "deflate payload", "deflate resp
 local redirect = http.request_sync_result(base .. "/redirect", nil, 3)
 check(redirect.status == 200 and redirect.final_url == base .. "/gzip", "redirect metadata incorrect")
 check(redirect.body == "gzip 测试正文", "redirect gzip body was not decoded")
+local gbk = http.request_sync_result(base .. "/gbk", nil, 3)
+check(gbk.body == "冷清的月光照进书房" and gbk.charset_applied, "GBK header conversion failed")
+local gb18030 = http.request_sync_result(base .. "/gb18030", nil, 3)
+check(gb18030.body == "冷清的月光照进书房" and gb18030.charset_applied, "GB18030 header conversion failed")
+local gbk_meta = http.request_sync_result(base .. "/gbk-meta", nil, 3)
+check(gbk_meta.body == '<meta charset="gbk">冷清的月光照进书房', "HTML meta charset conversion failed")
+local explicit_gbk = http.request_sync_result(base .. "/gbk-meta", json.encode({ charset = "gbk" }), 3)
+check(explicit_gbk.charset_requested == "gbk" and explicit_gbk.body == gbk_meta.body, "explicit GBK option failed")
 
 local opts = {
     method = "POST",
