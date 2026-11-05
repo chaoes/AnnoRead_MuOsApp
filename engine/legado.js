@@ -718,6 +718,22 @@
         let index = 0;
         const len = str.length;
 
+        // A '>' inside a quoted attribute is data, not the end of the tag.
+        function findTagClose(start) {
+            let quote = null;
+            for (let i = start; i < len; i++) {
+                const ch = str[i];
+                if (quote) {
+                    if (ch === quote) quote = null;
+                } else if (ch === '"' || ch === "'") {
+                    quote = ch;
+                } else if (ch === '>') {
+                    return i;
+                }
+            }
+            return -1;
+        }
+
         while (index < len) {
             const nextTag = str.indexOf('<', index);
             if (nextTag === -1) {
@@ -785,7 +801,7 @@
             }
 
             // Start tag <tag ...>
-            const tagClose = str.indexOf('>', nextTag + 1);
+            const tagClose = findTagClose(nextTag + 1);
             if (tagClose === -1) break;
 
             const tagContent = str.slice(nextTag + 1, tagClose).trim();
@@ -874,20 +890,14 @@
 
         // 1. :not(selector)
         const notMatches = [];
-        sel = sel.replace(/:not\(\s*([^)]+?)\s*\)/g, (_, inner) => {
-            notMatches.push(inner.trim());
-            return '';
-        });
+        sel = consumePseudoArguments(sel, 'not', notMatches);
         for (const inner of notMatches) {
-            if (matchesSimpleSelector(node, inner)) return false;
+            if (splitSelectorGroups(inner).some(part => matchesSimpleSelector(node, part))) return false;
         }
 
         // 2. :has(selector)
         const hasMatches = [];
-        sel = sel.replace(/:has\(\s*([^)]+?)\s*\)/g, (_, inner) => {
-            hasMatches.push(inner.trim());
-            return '';
-        });
+        sel = consumePseudoArguments(sel, 'has', hasMatches);
         for (const inner of hasMatches) {
             if (node.select(inner).length === 0) return false;
         }
@@ -949,15 +959,15 @@
             if (node.parent && node.parent.nodeType === 1) return false;
         }
 
-        if (sel.includes(':first-child') || sel.includes(':first')) {
-            sel = sel.replace(/:first-child/g, '').replace(/:first/g, '');
+        if (sel.includes(':first-child') || /:first(?![-\w])/.test(sel)) {
+            sel = sel.replace(/:first-child/g, '').replace(/:first(?![-\w])/g, '');
             if (!node.parent) return false;
             const sibs = node.parent.children.filter(c => c.nodeType === 1);
             if (sibs[0] !== node) return false;
         }
 
-        if (sel.includes(':last-child') || sel.includes(':last')) {
-            sel = sel.replace(/:last-child/g, '').replace(/:last/g, '');
+        if (sel.includes(':last-child') || /:last(?![-\w])/.test(sel)) {
+            sel = sel.replace(/:last-child/g, '').replace(/:last(?![-\w])/g, '');
             if (!node.parent) return false;
             const sibs = node.parent.children.filter(c => c.nodeType === 1);
             if (sibs[sibs.length - 1] !== node) return false;
@@ -1055,6 +1065,39 @@
         }
 
         return true;
+    }
+
+    function consumePseudoArguments(selector, name, args) {
+        const marker = ':' + name + '(';
+        let result = '', quote = null, square = 0, round = 0;
+        for (let i = 0; i < selector.length; i++) {
+            if (!quote && square === 0 && round === 0 && selector.startsWith(marker, i)) {
+                let depth = 1, innerQuote = null, end = i + marker.length;
+                for (; end < selector.length; end++) {
+                    const ch = selector[end];
+                    if (innerQuote) {
+                        if (ch === innerQuote && selector[end - 1] !== '\\') innerQuote = null;
+                    } else if (ch === '"' || ch === "'") innerQuote = ch;
+                    else if (ch === '(') depth++;
+                    else if (ch === ')' && --depth === 0) break;
+                }
+                if (depth === 0) {
+                    args.push(selector.slice(i + marker.length, end).trim());
+                    i = end;
+                    continue;
+                }
+            }
+            const ch = selector[i];
+            result += ch;
+            if (quote) {
+                if (ch === quote && selector[i - 1] !== '\\') quote = null;
+            } else if (ch === '"' || ch === "'") quote = ch;
+            else if (ch === '[') square++;
+            else if (ch === ']') square = Math.max(0, square - 1);
+            else if (ch === '(') round++;
+            else if (ch === ')') round = Math.max(0, round - 1);
+        }
+        return result;
     }
 
     function splitSelectorGroups(str) {
@@ -1210,17 +1253,19 @@
             const indexMatch = !sliceMatch && tok.match(/\[\s*(-?\d+)\s*\]/);
 
             const eqMatch = tok.match(/:eq\(\s*(-?\d+)\s*\)/i);
-            const gtMatch = tok.match(/:gt\(\s*(\d+)\s*\)/i);
-            const ltMatch = tok.match(/:lt\(\s*(\d+)\s*\)/i);
+            const gtMatch = tok.match(/:gt\(\s*(-?\d+)\s*\)/i);
+            const ltMatch = tok.match(/:lt\(\s*(-?\d+)\s*\)/i);
             const nthMatch = tok.match(/:nth-child\(\s*([^)]*?)\s*\)/i);
+            const nthTypeMatch = tok.match(/:nth-of-type\(\s*([^)]*?)\s*\)/i);
 
             let baseTok = tok;
             if (sliceMatch) baseTok = baseTok.replace(/\[\s*(-?\d*)\s*:\s*(-?\d*)\s*\]/, '');
             if (indexMatch) baseTok = baseTok.replace(/\[\s*(-?\d+)\s*\]/, '');
             if (eqMatch) baseTok = baseTok.replace(/:eq\(\s*-?\d+\s*\)/i, '');
-            if (gtMatch) baseTok = baseTok.replace(/:gt\(\s*\d+\s*\)/i, '');
-            if (ltMatch) baseTok = baseTok.replace(/:lt\(\s*\d+\s*\)/i, '');
+            if (gtMatch) baseTok = baseTok.replace(/:gt\(\s*-?\d+\s*\)/i, '');
+            if (ltMatch) baseTok = baseTok.replace(/:lt\(\s*-?\d+\s*\)/i, '');
             if (nthMatch) baseTok = baseTok.replace(/:nth-child\(\s*[^)]*?\s*\)/i, '');
+            if (nthTypeMatch) baseTok = baseTok.replace(/:nth-of-type\(\s*[^)]*?\s*\)/i, '');
 
             const nextCandidates = [];
             for (const parent of currentCandidates) {
@@ -1255,6 +1300,12 @@
                         return nthChildMatches(nthMatch[1], siblings.indexOf(el) + 1);
                     });
                 }
+                if (nthTypeMatch) {
+                    matched = matched.filter(el => {
+                        const siblings = el.parent ? el.parent.children.filter(child => child.nodeType === 1 && child.tagName === el.tagName) : [];
+                        return nthChildMatches(nthTypeMatch[1], siblings.indexOf(el) + 1);
+                    });
+                }
                 if (sliceMatch) {
                     const start = sliceMatch[1] !== '' ? parseInt(sliceMatch[1], 10) : 0;
                     const end = sliceMatch[2] !== '' ? parseInt(sliceMatch[2], 10) : undefined;
@@ -1265,18 +1316,20 @@
                     if (idx < 0) idx = matched.length + idx;
                     matched = (idx >= 0 && idx < matched.length) ? [matched[idx]] : [];
                 }
-                if (eqMatch) {
-                    let eqIndex = parseInt(eqMatch[1], 10);
-                    if (eqIndex < 0) eqIndex = matched.length + eqIndex;
-                    matched = (eqIndex >= 0 && eqIndex < matched.length) ? [matched[eqIndex]] : [];
-                }
-                if (gtMatch) {
-                    const gtIndex = parseInt(gtMatch[1], 10);
-                    matched = matched.filter((_, idx) => idx > gtIndex);
-                }
-                if (ltMatch) {
-                    const ltIndex = parseInt(ltMatch[1], 10);
-                    matched = matched.filter((_, idx) => idx < ltIndex);
+                if (eqMatch || gtMatch || ltMatch) {
+                    matched = matched.filter(el => {
+                        const siblings = el.parent ? el.parent.children.filter(child => child.nodeType === 1) : [];
+                        const position = siblings.indexOf(el);
+                        const keep = (match, comparison) => {
+                            if (!match) return true;
+                            let index = parseInt(match[1], 10);
+                            if (index < 0) index += siblings.length;
+                            return comparison(position, index);
+                        };
+                        return keep(eqMatch, (a, b) => a === b) &&
+                            keep(gtMatch, (a, b) => a > b) &&
+                            keep(ltMatch, (a, b) => a < b);
+                    });
                 }
 
                 for (const m of matched) nextCandidates.push(m);
@@ -1525,9 +1578,9 @@
         if (bracketIndexMatch) {
             return { selector: bracketIndexMatch[1].trim(), indexOp: bracketIndexMatch[2].trim() };
         }
-        if (trimmed.includes('!')) {
-            const parts = trimmed.split('!');
-            return { selector: parts[0].trim(), indexOp: '!' + parts[1].trim() };
+        const exclusions = splitRuleTopLevel(trimmed, '!');
+        if (exclusions.length === 2 && /^-?\d+$/.test(exclusions[1])) {
+            return { selector: exclusions[0], indexOp: '!' + exclusions[1] };
         }
         const match = trimmed.match(/^(.*)\.(-?\d+)$/);
         if (match) {
@@ -1692,26 +1745,39 @@
         };
     }
 
+    function splitRuleTopLevel(rule, separator, stopAtScript = false) {
+        const text = String(rule || '');
+        const parts = [];
+        let start = 0, quote = null, square = 0, round = 0, curly = 0;
+        for (let i = 0; i < text.length; i++) {
+            const ch = text[i];
+            if (quote) {
+                if (ch === quote && text[i - 1] !== '\\') quote = null;
+                continue;
+            }
+            if (ch === '"' || ch === "'") { quote = ch; continue; }
+            if (ch === '[') { square++; continue; }
+            if (ch === ']') { square = Math.max(0, square - 1); continue; }
+            if (ch === '(') { round++; continue; }
+            if (ch === ')') { round = Math.max(0, round - 1); continue; }
+            if (ch === '{') { curly++; continue; }
+            if (ch === '}') { curly = Math.max(0, curly - 1); continue; }
+            if (square || round || curly) continue;
+            if (stopAtScript && (text.startsWith('@js:', i) || text.startsWith('<js>', i))) break;
+            if (text.startsWith(separator, i)) {
+                parts.push(text.slice(start, i).trim());
+                i += separator.length - 1;
+                start = i + 1;
+            }
+        }
+        parts.push(text.slice(start).trim());
+        return parts.filter(Boolean);
+    }
+
     function splitTopLevelAlts(rule) {
         if (!rule) return [];
         const trimmed = String(rule).trim();
-        if (trimmed.startsWith('@js:') || (trimmed.startsWith('<js>') && trimmed.endsWith('</js>'))) {
-            return [trimmed];
-        }
-        const jsIdx = trimmed.indexOf('@js:');
-        const jsTagIdx = trimmed.indexOf('<js>');
-        let cutoff = trimmed.length;
-        if (jsIdx !== -1) cutoff = Math.min(cutoff, jsIdx);
-        if (jsTagIdx !== -1) cutoff = Math.min(cutoff, jsTagIdx);
-
-        const beforeJs = trimmed.slice(0, cutoff);
-        if (beforeJs.includes('||')) {
-            const parts = beforeJs.split('||');
-            const lastPart = parts.pop() + trimmed.slice(cutoff);
-            parts.push(lastPart);
-            return parts.map(p => p.trim()).filter(Boolean);
-        }
-        return [trimmed];
+        return splitRuleTopLevel(trimmed, '||', true);
     }
 
     class RuleAnalyzer {
@@ -1755,7 +1821,7 @@
 
             // '%%' interleave across sub-rules (e.g. "a@text%%b@text").
             if (trimmed.includes('%%')) {
-                const parts = trimmed.split('%%').map(p => p.trim()).filter(Boolean);
+                const parts = splitRuleTopLevel(trimmed, '%%', true);
                 if (parts.length > 1) {
                     const lists = parts.map(p => RuleAnalyzer.extractList(target, p, baseUrl, variables));
                     const merged = interleaveLists(lists);
@@ -1833,8 +1899,9 @@
             }
 
             // Hierarchy @ chaining
-            if (cleanRule.includes('@')) {
-                const tokens = cleanRule.split('@');
+            const chainTokens = splitRuleTopLevel(cleanRule, '@');
+            if (cleanRule.startsWith('@') || chainTokens.length > 1) {
+                const tokens = chainTokens;
                 let currentElements = [element];
                 const tokenList = tokens.map(t => t.trim()).filter(Boolean);
 
@@ -1906,7 +1973,7 @@
             // '%%' interleave in scalar context: join each interleaved list by '\n'.
             const ruleStr = String(rule);
             if (ruleStr.includes('%%')) {
-                const parts = ruleStr.split('%%').map(p => p.trim()).filter(Boolean);
+                const parts = splitRuleTopLevel(ruleStr, '%%', true);
                 if (parts.length > 1) {
                     const lists = parts.map(p => RuleAnalyzer.extractList(elementOrJson, p, baseUrl, variables));
                     const merged = interleaveLists(lists);
@@ -2074,7 +2141,7 @@
                 if (preRule) {
                     // preRule could have &&
                     if (preRule.includes('&&')) {
-                        const parts = preRule.split('&&');
+                        const parts = splitRuleTopLevel(preRule, '&&');
                         const results = [];
                         for (const p of parts) {
                             let val = RuleAnalyzer.extractSingleString(target, p.trim(), baseUrl, variables);
@@ -2128,13 +2195,15 @@
 
             // 2. Handle && rule joining (e.g. $.catName && $.bookStatus)
             if (trimmed.includes('&&')) {
-                const parts = trimmed.split('&&');
+                const parts = splitRuleTopLevel(trimmed, '&&', true);
+                if (parts.length > 1) {
                 const results = [];
                 for (const p of parts) {
                     const subVal = RuleAnalyzer.extractSingleString(target, p.trim(), baseUrl, variables);
                     if (subVal) results.push(subVal);
                 }
                 return results.join('\n');
+                }
             }
 
             // 3. JSONPath extraction if target is an object/json-string or rule starts with $. or @json:
@@ -2211,8 +2280,8 @@
                 if (DIRECT_ATTRS.has(lowerMain)) {
                     currentText = extractAttrFromElement(elem, lowerMain);
                     if (lowerMain === 'href' || lowerMain === 'src') isUrlAttr = true;
-                } else if (mainRule.includes('@')) {
-                    const tokens = mainRule.split('@').filter(Boolean);
+                } else if (splitRuleTopLevel(mainRule, '@').length > 1) {
+                    const tokens = splitRuleTopLevel(mainRule, '@');
                     if (tokens.length > 0) {
                         const lastToken = tokens[tokens.length - 1].trim();
                         const lowerLast = lastToken.toLowerCase();
@@ -2336,6 +2405,17 @@
             for (const part of parts) {
                 if (cur === null || cur === undefined) break;
 
+                // Bracket properties preserve dots and punctuation in JSON keys.
+                const quotedKey = part.match(/^([a-zA-Z0-9_$\-]*)\[(['"])(.*)\2\]$/);
+                if (quotedKey) {
+                    const target = quotedKey[1] ? cur[quotedKey[1]] : cur;
+                    const key = quotedKey[3].replace(/\\(['"\\])/g, '$1');
+                    cur = Array.isArray(target)
+                        ? target.map(item => item && item[key]).filter(value => value !== undefined && value !== null)
+                        : target && target[key];
+                    continue;
+                }
+
                 // 1. JSONPath Filter Predicate: e.g. "book[?(@.price > 10)]" or root array "[?(@.id > 1)]"
                 const filterMatch = part.match(/^([a-zA-Z0-9_\-]*)\[\?\((.+)\)\]$/);
                 if (filterMatch) {
@@ -2394,14 +2474,25 @@
                     }
                 }
 
-                // 3. Simple Index or Wildcard: e.g. "book[0]" or "book[*]"
-                const arrMatch = part.match(/^([a-zA-Z0-9_\-]+)\[(\d+|\*)\]$/);
+                // 3. Union, index or wildcard, with optional field name.
+                const unionMatch = part.match(/^([a-zA-Z0-9_$\-]*)\[(-?\d+(?:\s*,\s*-?\d+)+)\]$/);
+                if (unionMatch) {
+                    const target = unionMatch[1] ? cur[unionMatch[1]] : cur;
+                    cur = Array.isArray(target) ? unionMatch[2].split(',').map(raw => {
+                        const index = parseInt(raw.trim(), 10);
+                        return target[index < 0 ? target.length + index : index];
+                    }).filter(value => value !== undefined) : [];
+                    continue;
+                }
+                const arrMatch = part.match(/^([a-zA-Z0-9_$\-]*)\[(-?\d+|\*)\]$/);
                 if (arrMatch) {
                     const field = arrMatch[1];
                     const idx = arrMatch[2];
-                    cur = cur[field];
-                    if (Array.isArray(cur)) {
-                        cur = idx === '*' ? cur : cur[parseInt(idx, 10)];
+                    cur = field ? cur[field] : cur;
+                    if (Array.isArray(cur) && idx !== '*') {
+                        let index = parseInt(idx, 10);
+                        if (index < 0) index += cur.length;
+                        cur = cur[index];
                     }
                 } else if (Array.isArray(cur)) {
                     // Extract property from each element in current list (e.g. list.title)

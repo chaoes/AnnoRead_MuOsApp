@@ -3,6 +3,37 @@
     const L = Legado;
     const assert = (ok, message) => { if (!ok) throw new Error(message); };
 
+    const quotedHtml = '<a href="mailto:a@b.com" data-rule="a||b" data-join="a&&b" data-mix="a%%b">Mail</a>';
+    assert(L.RuleAnalyzer.extractString(quotedHtml, 'a[href*="@"]@href') === 'mailto:a@b.com',
+        'attribute @ must not split a selector chain');
+    assert(L.RuleAnalyzer.extractString(quotedHtml, 'a[data-rule="a||b"]@text') === 'Mail' &&
+        L.RuleAnalyzer.extractString(quotedHtml, 'a[data-join="a&&b"]@text') === 'Mail' &&
+        L.RuleAnalyzer.extractString(quotedHtml, 'a[data-mix="a%%b"]@text') === 'Mail' &&
+        L.RuleAnalyzer.extractString(quotedHtml, 'a[href!="wrong"]@text') === 'Mail' &&
+        L.RuleAnalyzer.extractList(L.parseHTML(quotedHtml).selectFirst('a'), '@text')[0] === 'Mail',
+        'rule operators inside quoted attributes are literal');
+    assert(L.RuleAnalyzer.extractString('<a href="/book?q=1>0">Read</a>', 'a@href') === '/book?q=1>0',
+        'quoted greater-than does not close an HTML tag');
+
+    const positions = L.parseHTML('<div><p>A</p><span>X</span><p>B</p></div>');
+    assert(positions.select('p:eq(1)').length === 0 && positions.select('p:eq(2)')[0].text() === 'B' &&
+        positions.select('p:gt(0)').length === 1 && positions.select('p:lt(1)')[0].text() === 'A',
+        'jsoup positional selectors use element sibling indexes');
+    assert(positions.select('p:nth-of-type(2)')[0].text() === 'B' &&
+        positions.select('p:first-of-type')[0].text() === 'A', 'type-relative selectors');
+    const excluded = L.parseHTML('<div class="a">A</div><div class="b">B</div><div>C</div>');
+    assert(excluded.select('div:not(.a, .b)').length === 1 &&
+        excluded.select('div:not(.a, .b)')[0].text() === 'C', 'nested pseudo selector list');
+    const nested = L.parseHTML('<section><a class="disabled">A</a><a>B</a></section>');
+    assert(nested.select('section:has(a:not(.disabled))').length === 1,
+        'nested :not inside :has keeps its original context');
+
+    const jsonPaths = {rows: [{name: 'A'}, {name: 'B'}, {name: 'C'}], 'odd.key': 'value'};
+    assert(L.RuleAnalyzer.extractFromJson(jsonPaths, "$['odd.key']") === 'value' &&
+        L.RuleAnalyzer.extractFromJson(jsonPaths, '$.rows[-1].name') === 'C' &&
+        JSON.stringify(L.RuleAnalyzer.extractFromJson(jsonPaths, '$.rows[0,2].name')) === '["A","C"]',
+        'quoted JSON keys, negative indexes and index unions');
+
     const urlScript = {bookSourceUrl: 'https://t.test',
         searchUrl: '@js: let u=baseUrl + "/s?q=" + encodeURIComponent(key); u'};
     assert(L.LegadoEngine.buildSearchRequest(urlScript, 'a b', 1).url ===
