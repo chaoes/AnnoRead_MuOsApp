@@ -27,6 +27,13 @@
     const nested = L.parseHTML('<section><a class="disabled">A</a><a>B</a></section>');
     assert(nested.select('section:has(a:not(.disabled))').length === 1,
         'nested :not inside :has keeps its original context');
+    const scoped = L.parseHTML('<div id="outer"><div id="inner"><a>Book</a></div></div>');
+    assert(scoped.select('div div').length === 1 &&
+        scoped.select('div div')[0].attr('id') === 'inner' &&
+        scoped.select('div a').length === 1 &&
+        scoped.select('div:has(div)').length === 1 &&
+        scoped.select('div:has(div)')[0].attr('id') === 'outer',
+        'descendant selectors exclude self and overlapping contexts return unique elements');
 
     const jsonPaths = {rows: [{name: 'A'}, {name: 'B'}, {name: 'C'}], 'odd.key': 'value'};
     assert(L.RuleAnalyzer.extractFromJson(jsonPaths, "$['odd.key']") === 'value' &&

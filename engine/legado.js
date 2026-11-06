@@ -946,7 +946,7 @@
         const hasMatches = [];
         sel = consumePseudoArguments(sel, 'has', hasMatches);
         for (const inner of hasMatches) {
-            if (node.select(inner).length === 0) return false;
+            if (!node.select(inner).some(match => match !== node)) return false;
         }
 
         // 3. :contains(text)
@@ -1312,6 +1312,7 @@
             if (nthLastTypeMatch) baseTok = baseTok.replace(/:nth-last-of-type\(\s*[^)]*?\s*\)/i, '');
 
             const nextCandidates = [];
+            const seenCandidates = new Set();
             for (const parent of currentCandidates) {
                 let matched = [];
                 if (combinator === '>') {
@@ -1333,7 +1334,9 @@
                     }
                 } else {
                     matched = collectDescendants(parent, el => matchesSimpleSelector(el, baseTok));
-                    if (parent.nodeType === 1 && matchesSimpleSelector(parent, baseTok)) {
+                    // Element.select may include its context element for the
+                    // first simple selector, but a descendant step cannot.
+                    if (i === 0 && parent.nodeType === 1 && matchesSimpleSelector(parent, baseTok)) {
                         matched.unshift(parent);
                     }
                 }
@@ -1388,7 +1391,12 @@
                     });
                 }
 
-                for (const m of matched) nextCandidates.push(m);
+                for (const m of matched) {
+                    if (!seenCandidates.has(m)) {
+                        seenCandidates.add(m);
+                        nextCandidates.push(m);
+                    }
+                }
             }
             currentCandidates = nextCandidates;
             combinator = ' ';
