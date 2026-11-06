@@ -274,7 +274,7 @@
         if (!relativeUrl) return '';
         const trimmed = String(relativeUrl).trim();
         if (!trimmed) return '';
-        if (/^(https?:|data:|javascript:|file:)/i.test(trimmed)) return trimmed;
+        if (/^[a-z][a-z0-9+.-]*:/i.test(trimmed)) return trimmed;
         if (trimmed.startsWith('//')) {
             const protocol = baseUrl.startsWith('https:') ? 'https:' : 'http:';
             return protocol + trimmed;
@@ -287,6 +287,9 @@
 
             const origin = baseMatch[1];
             const basePath = baseMatch[4] || '/';
+
+            if (trimmed.startsWith('?')) return origin + basePath + trimmed;
+            if (trimmed.startsWith('#')) return origin + basePath + (baseMatch[5] || '') + trimmed;
 
             if (trimmed.startsWith('/')) {
                 return origin + trimmed;
@@ -2429,8 +2432,11 @@
 
             let elem = target;
             if (typeof target === 'string' && !(target.startsWith('{') || target.startsWith('['))) {
-                // If mainRule has CSS or @, parse HTML
-                if (mainRule.includes('.') || mainRule.includes('#') || mainRule.includes('@') || mainRule.includes(' ')) {
+                // A simple tag selector such as `h1` still needs a DOM when
+                // the target is an HTML response, not the raw response text.
+                if (/<\/?[a-z][^>]*>/i.test(target) ||
+                    mainRule.includes('.') || mainRule.includes('#') ||
+                    mainRule.includes('@') || mainRule.includes(' ')) {
                     elem = parseHTML(target);
                 } else {
                     currentText = target;

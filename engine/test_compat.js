@@ -14,6 +14,15 @@
         'rule operators inside quoted attributes are literal');
     assert(L.RuleAnalyzer.extractString('<a href="/book?q=1>0">Read</a>', 'a@href') === '/book?q=1>0',
         'quoted greater-than does not close an HTML tag');
+    assert(L.RuleAnalyzer.extractString('<h1>书名</h1><p>噪音</p>', 'h1') === '书名' &&
+        L.RuleAnalyzer.extractString('plain text', 'h1') === 'plain text',
+        'simple tag selectors parse HTML while plain text remains text');
+    const simpleBook = L.LegadoEngine.parseBookInfo({bookSourceUrl: 'https://simple.test',
+        ruleBookInfo: {name: 'h1'}}, '<h1>正确书名</h1><p>噪音</p>');
+    const simpleContent = L.LegadoEngine.parseContent({bookSourceUrl: 'https://simple.test',
+        ruleContent: {content: 'div'}}, '<h1>页面标题</h1><div>正文段落</div>');
+    assert(simpleBook.name === '正确书名' && simpleContent.content === '正文段落',
+        'simple tag rules extract book metadata and chapter content');
 
     const positions = L.parseHTML('<div><p>A</p><span>X</span><p>B</p></div>');
     assert(positions.select('p:eq(1)').length === 0 && positions.select('p:eq(2)')[0].text() === 'B' &&
@@ -151,6 +160,20 @@
         'data URI request stays absolute and preserves response type option');
     assert(L.resolveUrl('https://data.test/path', 'data:text/plain,hello') ===
         'data:text/plain,hello', 'data scheme is absolute during URL resolution');
+    assert(L.resolveUrl('https://books.test/catalog/list.html?old=1', '?page=2') ===
+        'https://books.test/catalog/list.html?page=2' &&
+        L.resolveUrl('https://books.test/catalog/list.html?old=1', '#chapter') ===
+        'https://books.test/catalog/list.html?old=1#chapter' &&
+        L.resolveUrl('https://books.test/catalog/list.html', 'mailto:reader@example.test') ===
+        'mailto:reader@example.test',
+        'query, fragment and explicit scheme links resolve without losing the current page');
+    const queryToc = L.LegadoEngine.parseToc({bookSourceUrl: 'https://books.test', ruleToc: {
+        chapterList: 'a', chapterName: 'text', chapterUrl: 'href', nextTocUrl: 'a.next@href'}},
+        '<a href="chapter-1.html">第一章</a><a class="next" href="?page=2">下一页</a>',
+        'https://books.test/catalog/list.html?page=1');
+    assert(queryToc.nextTocUrl === 'https://books.test/catalog/list.html?page=2' &&
+        queryToc.chapters.length === 1,
+        'query-only TOC pagination resolves against the current page');
 
     const previousCryptoCallback = globalThis.__legado_native_crypto;
     let cryptoArgs = null;
