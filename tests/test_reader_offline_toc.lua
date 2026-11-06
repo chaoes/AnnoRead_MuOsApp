@@ -28,7 +28,8 @@ function love.filesystem.getDirectoryItems(path)
 end
 love.timer = { getTime = function() return 1 end }
 
-local source = { bookSourceUrl = "source-A", bookSourceName = "A", enabled = true }
+local source = { bookSourceUrl = "source-A", bookSourceName = "A", enabled = true,
+    ruleBookInfo = { tocUrl = "toc-rule" } }
 local requests = {}
 package.loaded["src.storage"] = {
     get_sources = function() return { source } end,

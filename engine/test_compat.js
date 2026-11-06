@@ -14,6 +14,9 @@
         'rule operators inside quoted attributes are literal');
     assert(L.RuleAnalyzer.extractString('<a href="/book?q=1>0">Read</a>', 'a@href') === '/book?q=1>0',
         'quoted greater-than does not close an HTML tag');
+    const malformedCatalog = L.parseHTML('<div class="full"\"><div id="showmore01"><dd><a href="/1">第一章</a></dd></div></div>');
+    assert(malformedCatalog.select('#showmore01 dd a').length === 1,
+        'stray attribute quote does not consume the following chapter list');
     assert(L.RuleAnalyzer.extractString('<h1>书名</h1><p>噪音</p>', 'h1') === '书名' &&
         L.RuleAnalyzer.extractString('plain text', 'h1') === 'plain text',
         'simple tag selectors parse HTML while plain text remains text');

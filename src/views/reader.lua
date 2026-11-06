@@ -683,7 +683,10 @@ function reader.load_toc(background)
     http.request_async({ url = target_toc_url, method = "GET", timeout = 8 }, function(resp, _, _, meta)
         if not still_current() then return end
         if not resp or #resp == 0 or (meta and (meta.error or (meta.status and meta.status >= 400))) then fail("目录更新失败，继续使用本地目录"); return end
-        local detail_obj = json.decode(legado.parseBookInfo(src_json, resp, target_toc_url))
+        local detail_obj
+        if active_source.ruleBookInfo and active_source.ruleBookInfo.tocUrl then
+            detail_obj = json.decode(legado.parseBookInfo(src_json, resp, target_toc_url))
+        end
         local real_toc_url = detail_obj and detail_obj.tocUrl and #detail_obj.tocUrl > 0
             and detail_obj.tocUrl or target_toc_url
         local all_chapters, visited, pages_seen = {}, {}, 0

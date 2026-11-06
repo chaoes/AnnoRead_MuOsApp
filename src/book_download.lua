@@ -67,7 +67,7 @@ local function fetch_all_chapters(source, book, on_done)
     http.request_async({ url = target_toc_url, method = "GET", timeout = 8 }, function(resp, _, _, meta)
         local real_toc_url = target_toc_url
         if not resp or #resp == 0 or (meta and (meta.error or (meta.status and meta.status >= 400))) then on_done(nil); return end
-        if resp and #resp > 0 then
+        if source.ruleBookInfo and source.ruleBookInfo.tocUrl then
             local detail_json = legado.parseBookInfo(src_json, resp, target_toc_url)
             local detail_obj = json.decode(detail_json)
             if detail_obj and detail_obj.tocUrl and #detail_obj.tocUrl > 0 then

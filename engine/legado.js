@@ -732,7 +732,12 @@
                 if (quote) {
                     if (ch === quote) quote = null;
                 } else if (ch === '"' || ch === "'") {
-                    quote = ch;
+                    // Only `=` can introduce a quoted attribute value. Some
+                    // sites emit an extra quote after a value (`class="x""`);
+                    // treating it as a new value swallows the following tag.
+                    let before = i - 1;
+                    while (before >= start && /\s/.test(str[before])) before--;
+                    if (str[before] === '=') quote = ch;
                 } else if (ch === '>') {
                     return i;
                 }
