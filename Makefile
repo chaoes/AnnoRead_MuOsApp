@@ -9,7 +9,7 @@ ENGINE_DIR  = engine
 AARCH64_SO  = $(ENGINE_DIR)/liblegado_qjs_aarch64.so
 VENDOR_DIR  = package/vendor
 
-.PHONY: all run test package cross clean
+.PHONY: all run test package package-ports cross clean
 
 all: test
 
@@ -64,6 +64,11 @@ test:
 # Cross-build the QuickJS rule engine for the handheld (aarch64 / glibc 2.38).
 cross:
 	@$(MAKE) -C $(ENGINE_DIR) cross
+
+# Independent PortMaster archive; keeps the existing in-app keyboard and layout.
+package-ports: test cross
+	@python3 tests/test_ports_package.py
+	@python3 package/make_ports.py --output "$(DIST_DIR)/annoread.zip"
 
 # Assemble the muOS .muxapp for RG CubeXX (aarch64, glibc 2.38).
 #

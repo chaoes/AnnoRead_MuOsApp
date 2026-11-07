@@ -15,6 +15,7 @@ AnnoRead 是面向 Anbernic RG CubeXX（muOS、720×720 屏幕）的 LÖVE / Lua
 | 字段 | 说明 |
 | --- | --- |
 | `api_key` | MiMo API Key；也可通过 `MIMO_TTS_API_KEY` 环境变量提供。 |
+| `api_url` | 普通 API Key 设置为 `https://api.xiaomimimo.com/v1/chat/completions`；省略时保持原有 Token Plan 地址。Key 与接口类型需一致。 |
 | `voice` | MiMo 预置音色 ID，默认 `茉莉`。 |
 | `voice_style` | 自然语言音色提示词；默认是清冷、干净的青年女声。 |
 | `speed` | 相对语速，范围 `0.5`–`2.0`，默认 `1.12`（稍快）。 |
@@ -33,9 +34,12 @@ make test       # 构建本机规则引擎并运行离线测试
 make run        # 本机预览（需要 LÖVE）
 make cross      # 交叉编译 AArch64 规则引擎
 make package    # 测试、交叉编译并生成 dist/AnnoRead.muxapp
+make package-ports # 测试、交叉编译并生成 dist/annoread.zip（PortMaster 试用包）
 ```
 
 将 `.muxapp` 复制到 SD 卡的 `ARCHIVE` 目录，再通过 muOS Archive Manager 安装。用户数据位于 `<应用目录>/conf/love/rgcubexx-game/`；实际路径以 `love.filesystem.getSaveDirectory()` 返回值为准。构建及测试只验证主机和模拟环境，仍需在真实 RG CubeXX 上检查操作与显示。
+
+PortMaster 打包通过独立的 `make package-ports` 目标完成，保留现有 720×720 布局、手柄输入和应用内虚拟键盘/拼音输入法。当前试用包限定 AArch64、GLIBC ≥ 2.38，依赖 PortMaster `love_11.5` 运行时及 curl ≥ 7.75，尚未完成其他固件或掌机实测。生成的 ZIP 可通过 PortMaster `autoinstall` 安装，数据保存于 `annoread/conf/love/rgcubexx-game/`；完整安装、旧数据迁移与排查说明见 [PortMaster 说明](package/ports/README.md)。此打包目标始终只附带 TTS 示例配置，不打入个人 API Key、书源 JSON 或用户数据。新增打包器依赖 `readelf`（binutils）。
 
 规则引擎构建细节见 [engine/BUILDING.md](engine/BUILDING.md)。
 

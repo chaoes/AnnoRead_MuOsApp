@@ -3,6 +3,9 @@
 local json = require("src.json")
 
 local M = {}
+-- Preserve existing Token Plan installs; regular API keys can select the
+-- standard endpoint through their local configuration.
+M.DEFAULT_API_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
 M.DEFAULT_VOICE = "茉莉"
 M.DEFAULT_VOICE_STYLE = "清冷、干净的青年女声，音色清透，略带柔和的磁性；咬字轻盈清晰，情绪含蓄却有层次，像在静夜里从容讲述故事"
 M.DEFAULT_SPEED = 1.12
@@ -37,6 +40,7 @@ function M.normalize(raw)
     local voice = trim(raw.voice)
     return {
         api_key = trim(raw.api_key),
+        api_url = trim(raw.api_url) ~= "" and trim(raw.api_url) or M.DEFAULT_API_URL,
         voice = voice ~= "" and voice or M.DEFAULT_VOICE,
         voice_style = raw.voice_style == nil and M.DEFAULT_VOICE_STYLE or trim(raw.voice_style),
         speed = speed,

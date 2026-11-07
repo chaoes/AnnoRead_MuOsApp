@@ -1,0 +1,24 @@
+{
+  "version": 4,
+  "name": "annoread.zip",
+  "items": ["AnnoRead.sh", "annoread"],
+  "items_opt": [],
+  "attr": {
+    "title": "AnnoRead 阿诺阅读",
+    "porter": [],
+    "desc": "LÖVE reader with Legado-style sources, built-in Chinese virtual keyboard and optional MiMo TTS. Original 720x720 layout. AArch64 and GLIBC >= 2.38 required. Device testing pending.",
+    "desc_md": null,
+    "inst": "Requires PortMaster love_11.5 runtime and curl >= 7.75 with HTTPS support. Import your own book sources into annoread/sources/. See annoread/README.md for TTS setup.",
+    "inst_md": null,
+    "genres": ["other"],
+    "image": null,
+    "rtr": false,
+    "exp": true,
+    "runtime": ["love_11.5"],
+    "store": [],
+    "availability": "full",
+    "reqs": [],
+    "arch": ["aarch64"],
+    "min_glibc": "2.38"
+  }
+}

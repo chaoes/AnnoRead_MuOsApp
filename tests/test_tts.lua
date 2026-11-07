@@ -5,7 +5,15 @@ package.path = package.path .. ";./?.lua;./src/?.lua"
 
 print("=== Running MiMo TTS & Reader Integration Tests ===")
 
+-- Use an explicit non-secret fixture, independent of the developer's API key
+-- and whether their local account uses the regular API or Token Plan.
+local tts_config = require("src.tts_config")
+local original_load = tts_config.load
+tts_config.load = function()
+    return tts_config.normalize({ api_key = "test-key", api_url = "https://api.xiaomimimo.com/v1/chat/completions" })
+end
 local tts = require("src.tts")
+tts_config.load = original_load
 
 -- 1. Test Base64 Decoder
 print("--- 1. Testing Base64 Decoding ---")
@@ -62,7 +70,7 @@ local requested_url = nil
 http.request_async = function(opts, cb)
     req_called = true
     requested_url = opts.url
-    assert(opts.url:find("token%-plan%-cn%.xiaomimimo%.com"), "URL should target token-plan-cn.xiaomimimo.com")
+    assert(opts.url == "https://api.xiaomimimo.com/v1/chat/completions", "URL should use the configured regular API endpoint")
     assert(opts.headers and opts.headers["api-key"], "Should send api-key header")
     local body_data = require("src.json").decode(opts.body)
     assert(body_data.model == "mimo-v2.5-tts", "Model should be mimo-v2.5-tts")

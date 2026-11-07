@@ -1,7 +1,7 @@
 -- src/tts.lua
 -- MiMo-V2.5-TTS voice synthesis and paragraph reading engine for AnnoRead.
 -- Features:
---   - Integrates Xiaomi MiMo-V2.5-TTS via Token Plan OpenAI-compatible endpoint.
+--   - Integrates Xiaomi MiMo-V2.5-TTS via a configurable API / Token Plan endpoint.
 --   - Configurable preset voice, voice style, speed, and relative pitch.
 --   - Paragraph-by-paragraph pipelined synthesis with persistent disk caching.
 --   - Chapter prefetch: synthesizes current paragraphs and pre-fetches next chapter.
@@ -15,7 +15,6 @@ local aes = require("src.aes")
 local tts_cache = require("src.tts_cache")
 
 local tts_config = require("src.tts_config")
-local DEFAULT_API_URL = "https://token-plan-cn.xiaomimimo.com/v1/chat/completions"
 local DEFAULT_MODEL = "mimo-v2.5-tts"
 local DEFAULT_PROMPT = "请用自然流畅的普通话朗读小说，保持叙事连贯，停顿得体。"
 
@@ -24,7 +23,7 @@ local PREFETCH_AHEAD = 2
 local state = "idle" -- "idle" | "loading" | "playing" | "paused"
 local config = tts_config.load()
 local api_key = config.api_key
-local api_url = DEFAULT_API_URL
+local api_url = config.api_url
 local model = DEFAULT_MODEL
 local voice = config.voice
 local voice_style = config.voice_style

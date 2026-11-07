@@ -18,6 +18,10 @@ local loaded = tts_config.load()
 assert(loaded.api_key == "save-key", "save directory key should take priority")
 assert(loaded.voice == "苏打" and loaded.voice_style == "低沉温和", "bundled style should remain when save file omits it")
 assert(loaded.speed == 1.25 and loaded.pitch == -1, "save controls should override bundled controls")
+assert(loaded.api_url == tts_config.DEFAULT_API_URL, "existing configs should keep the Token Plan endpoint")
+files["mimo_tts.json"] = '{"api_key":"regular-api-key","api_url":" https://api.xiaomimimo.com/v1/chat/completions "}'
+assert(tts_config.load().api_url == "https://api.xiaomimimo.com/v1/chat/completions", "regular API endpoint should be configurable and trimmed")
+files["mimo_tts.json"] = '{"api_key":" save-key ","speed":1.25,"pitch":-1}'
 env_override = " environment-key "
 assert(tts_config.load().api_key == "environment-key", "environment key should take priority")
 env_override = nil
